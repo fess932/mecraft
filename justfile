@@ -4,10 +4,6 @@ instance := env("GTNH_INSTANCE", home_directory() / "AppData/Roaming/PrismLaunch
 icons_dump := instance / "dumps/itempanel_icons"
 bin := if os() == "windows" { "mecraft.exe" } else { "mecraft" }
 
-http := ":8080"
-oc := ":7777"
-token := ""
-
 # список команд
 default:
     @just --list
@@ -20,9 +16,9 @@ icons dump=icons_dump:
 build:
     go build -o {{bin}} .
 
-# собрать и запустить сервер: just run [токен]
-run token=token: build
-    ./{{bin}} -http "{{http}}" -oc "{{oc}}" -token "{{token}}"
+# собрать и запустить сервер; настройки в mecraft.json
+run: build
+    ./{{bin}}
 
 # иконки + сборка с нуля
 all: icons build

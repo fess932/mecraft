@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"time"
 )
 
 //go:embed assets/templates/*.html
@@ -33,35 +32,34 @@ func sub(f fs.FS, dir string) fs.FS {
 }
 
 func main() {
-	httpAddr := flag.String("http", ":8080", "address of the web UI")
-	ocAddr := flag.String("oc", ":7777", "address the OpenComputers client connects to")
-	token := flag.String("token", "", "shared secret the OC client must send (empty: no check)")
-	rulesPath := flag.String("rules", "mecraft-rules.json", "file with stock level rules")
-	every := flag.Duration("maintain-every", 5*time.Second, "how often stock levels are checked")
+	configPath := flag.String("config", "mecraft.json", "settings and stock levels; created with defaults if missing")
 	flag.Parse()
 
-	store := NewStore()
-	hub := NewHub(store, *token)
-	rules, err := LoadRules(*rulesPath)
+	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
+	every, _ := cfg.Interval()
+
+	store := NewStore()
+	hub := NewHub(store, cfg.Token)
+	rules := NewRules(*configPath, cfg)
 	icons := sub(iconsFS, "assets/icons")
 	web, err := NewWeb(store, hub, LoadIcons(icons), rules, sub(templatesFS, "assets/templates"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	go NewMaintainer(store, hub, rules, *every).Run()
+	go NewMaintainer(store, hub, rules, every).Run()
 
 	go func() {
-		if err := hub.Serve(*ocAddr); err != nil {
+		if err := hub.Serve(cfg.OC); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	log.Printf("web: listening on %s", *httpAddr)
+	log.Printf("web: listening on %s", cfg.HTTP)
 	handler := web.Routes(sub(staticFS, "assets/static"), icons, sub(ocFS, "oc"))
-	if err := http.ListenAndServe(*httpAddr, handler); err != nil {
+	if err := http.ListenAndServe(cfg.HTTP, handler); err != nil {
 		log.Fatal(err)
 	}
 }

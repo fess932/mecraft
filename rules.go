@@ -1,12 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -47,59 +44,41 @@ type RuleView struct {
 	Ordered time.Time
 }
 
+// Rules holds the stock levels and writes them back into the config file
+// together with the other settings.
 type Rules struct {
 	mu    sync.Mutex
 	path  string
+	cfg   Config // settings other than Rules, kept to rewrite the file
 	rules map[string]*Rule
 	state map[string]*ruleState
 }
 
-func LoadRules(path string) (*Rules, error) {
-	rs := &Rules{path: path, rules: map[string]*Rule{}, state: map[string]*ruleState{}}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return rs, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var list []Rule
-	if err := json.Unmarshal(data, &list); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	for _, r := range list {
+func NewRules(path string, cfg Config) *Rules {
+	rs := &Rules{path: path, cfg: cfg, rules: map[string]*Rule{}, state: map[string]*ruleState{}}
+	for _, r := range cfg.Rules {
 		r := r
 		rs.rules[r.Key] = &r
 	}
-	log.Printf("rules: %d loaded from %s", len(list), path)
-	return rs, nil
+	rs.cfg.Rules = nil
+	return rs
 }
 
-// save writes all rules atomically. Caller holds mu.
+// save writes the config with the current rules. Caller holds mu.
 func (rs *Rules) save() error {
 	list := make([]Rule, 0, len(rs.rules))
 	for _, r := range rs.rules {
 		list = append(list, *r)
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Key < list[j].Key })
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(rs.path), ".rules-*.json")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), rs.path)
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Label != list[j].Label {
+			return list[i].Label < list[j].Label
+		}
+		return list[i].Key < list[j].Key
+	})
+	cfg := rs.cfg
+	cfg.Rules = list
+	return writeConfig(rs.path, cfg)
 }
 
 func (rs *Rules) Get(key string) (Rule, bool) {
