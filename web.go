@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -23,10 +25,13 @@ type Web struct {
 
 const pageStep = 300
 
-func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS) (*Web, error) {
+// NewWeb builds the UI. version tags static and icon URLs so browsers can
+// cache them for good and still pick up a new build.
+func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS, version string) (*Web, error) {
 	w := &Web{store: store, hub: hub, icons: icons, rules: rules}
 	funcs := template.FuncMap{
-		"icon":  icons.URL,
+		"ver":   func() string { return version },
+		"icon":  func(label string) string { return icons.URL(label) + "?v=" + version },
 		"short": short,
 		"group": group,
 		"ago":   ago,
@@ -34,6 +39,17 @@ func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS)
 		"state": stateText,
 		"itemq": itemQuery,
 		"num":   func(n int) string { return group(int64(n)) },
+		"float": func(n int64) float64 { return float64(n) },
+		"cap100": func(n int) int {
+			return max(0, min(n, 100))
+		},
+		// mod is the mod id of an item id: "gregtech:gt.metaitem.01" -> "gregtech".
+		"mod": func(name string) string {
+			if i := strings.IndexByte(name, ':'); i > 0 {
+				return name[:i]
+			}
+			return name
+		},
 	}
 	tpl, err := template.New("").Funcs(funcs).ParseFS(templates, "*.html")
 	if err != nil {
@@ -60,11 +76,38 @@ func (w *Web) Routes(static, icons, oc fs.FS) http.Handler {
 	return mux
 }
 
+// cached lets browsers keep versioned URLs (?v=...) forever and makes them
+// revalidate anything else.
 func cached(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		rw.Header().Set("Cache-Control", "public, max-age=86400")
+		if r.URL.Query().Get("v") != "" {
+			rw.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			rw.Header().Set("Cache-Control", "no-cache")
+		}
 		h.ServeHTTP(rw, r)
 	})
+}
+
+// assetVersion hashes every file of the given trees except icon images
+// (their index.json already changes whenever they do).
+func assetVersion(trees ...fs.FS) string {
+	h := sha256.New()
+	for _, t := range trees {
+		_ = fs.WalkDir(t, ".", func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || strings.HasSuffix(p, ".png") {
+				return err
+			}
+			data, err := fs.ReadFile(t, p)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(h, "%s\x00%d\x00", p, len(data))
+			h.Write(data)
+			return nil
+		})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:10]
 }
 
 func (w *Web) render(rw http.ResponseWriter, name string, data any) {

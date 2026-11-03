@@ -164,4 +164,5 @@ OC → сервер: `hello {token}`, `items_begin`, `items {items}`, `items_end
 ## Лицензии
 
 `testdata/serialization.lua` — из [OpenComputers](https://github.com/GTNewHorizons/OpenComputers), MIT.
+`assets/static/fonts/tiny5-*.woff2` — шрифт [Tiny5](https://github.com/Gissio/font_tiny5), SIL OFL 1.1 (`assets/static/fonts/OFL-tiny5.txt`).
 `assets/static/htmx.min.js` — [htmx](https://htmx.org) 2.0.4, BSD Zero Clause.

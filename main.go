@@ -66,7 +66,9 @@ func main() {
 	hub := NewHub(store, cfg.Token)
 	rules := NewRules(*configPath, fileCfg)
 	icons := sub(iconsFS, "assets/icons")
-	web, err := NewWeb(store, hub, LoadIcons(icons), rules, sub(templatesFS, "assets/templates"))
+	static := sub(staticFS, "assets/static")
+	version := assetVersion(static, icons)
+	web, err := NewWeb(store, hub, LoadIcons(icons), rules, sub(templatesFS, "assets/templates"), version)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func main() {
 	}()
 
 	log.Printf("web: listening on %s", cfg.HTTP)
-	handler := web.Routes(sub(staticFS, "assets/static"), icons, sub(ocFS, "oc"))
+	handler := web.Routes(static, icons, sub(ocFS, "oc"))
 	if err := http.ListenAndServe(cfg.HTTP, handler); err != nil {
 		log.Fatal(err)
 	}

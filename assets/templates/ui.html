@@ -3,193 +3,338 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mecraft</title>
-<link rel="icon" href="/static/unknown.svg">
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/htmx.min.js"></script>
+<title>ME-терминал</title>
+<link rel="icon" href="/static/unknown.svg?v={{ver}}">
+<link rel="preload" href="/static/fonts/tiny5-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css?v={{ver}}">
+<script src="/static/htmx.min.js?v={{ver}}"></script>
 </head>
 <body>
-<header>
-  <h1>mecraft</h1>
-  <div id="status" hx-get="/status" hx-trigger="load, every 2s"></div>
-</header>
 
-<form id="filters" hx-get="/view" hx-target="#main" hx-trigger="input changed delay:300ms from:#q, change">
-  <nav class="tabs">
-    <label><input type="radio" name="tab" value="items" checked><span>Предметы</span></label>
-    <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
-    <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
-    <label><input type="radio" name="tab" value="rules"><span>Уровни</span></label>
-    <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
-  </nav>
-  <div class="bar">
-    <input id="q" name="q" type="search" placeholder="Поиск по названию или ID" autocomplete="off">
-    <label><input type="checkbox" name="stock" value="1" checked> в наличии</label>
-    <label><input type="checkbox" name="craftable" value="1"> крафтится</label>
-    <select name="sort">
-      <option value="amount">по количеству</option>
-      <option value="name">по названию</option>
-    </select>
-    <label title="Обновлять каждые 5 секунд"><input type="checkbox" id="auto" checked> авто</label>
-    <button type="button" hx-post="/resync" hx-target="#flash">Синхронизировать</button>
-    <span id="flash"></span>
-    <input type="hidden" id="limit" name="limit" value="{{.Step}}">
-  </div>
-</form>
+<div class="term">
+  <form id="filters" hx-get="/view" hx-target="#main" hx-trigger="input changed delay:300ms from:#q, change">
+    <nav class="tabs" aria-label="Разделы">
+      <label><input type="radio" name="tab" value="items" checked><span>Предметы</span></label>
+      <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
+      <label><input type="radio" name="tab" value="rules"><span>Уровни</span></label>
+      <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
+      <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
+    </nav>
 
-<div id="craft"></div>
+    <div class="frame">
+      <header class="head">
+        <h1>ME-терминал</h1>
+        <div id="status" hx-get="/status" hx-trigger="load, every 2s" hx-target="this"></div>
+      </header>
 
-<main id="main" hx-get="/view" hx-include="#filters"
-      hx-trigger="load, every 5s [document.getElementById('auto').checked]"></main>
+      <div class="bar">
+        <input id="q" class="field only-search" name="q" type="search" placeholder="Поиск" autocomplete="off" aria-label="Поиск по названию или ID">
+        <label class="toggle only-items"><input type="checkbox" name="stock" value="1" checked><span>В наличии</span></label>
+        <label class="toggle only-items"><input type="checkbox" name="craftable" value="1"><span>Крафтится</span></label>
+        <select class="btn only-items" name="sort" aria-label="Сортировка">
+          <option value="amount">По количеству</option>
+          <option value="name">По названию</option>
+        </select>
+        <label class="toggle" title="Обновлять каждые 5 секунд"><input type="checkbox" id="auto" checked><span>Авто</span></label>
+        <button type="button" class="btn" hx-post="/resync" hx-target="#flash" title="Запросить у OC полный список заново">Синхронизировать</button>
+        <span id="flash" role="status"></span>
+        <input type="hidden" id="limit" name="limit" value="{{.Step}}">
+      </div>
+    </div>
+  </form>
+
+  <main id="main" class="frame body" hx-get="/view" hx-include="#filters"
+        hx-trigger="load, every 5s [document.getElementById('auto').checked && !document.getElementById('craft').children.length]"></main>
+</div>
+
+<div id="craft" role="dialog" aria-modal="true"></div>
+<div id="tip" hidden></div>
 
 <script>
-  // Typing or switching filters starts from the first page again.
-  document.getElementById('filters').addEventListener('input', function (e) {
-    if (e.target.id !== 'limit') document.getElementById('limit').value = '{{.Step}}';
-  });
+  // Remember the tab, filters and search in this browser. Runs before htmx
+  // starts, so the first request already uses the restored values.
+  (function () {
+    var KEY = 'mecraft.ui';
+    var f = document.getElementById('filters');
+    var auto = document.getElementById('auto');
+    var s = {};
+    try { s = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
+    if (s.tab) {
+      var r = f.querySelector('input[name=tab][value="' + s.tab + '"]');
+      if (r) r.checked = true;
+    }
+    if (typeof s.stock === 'boolean') f.elements.stock.checked = s.stock;
+    if (typeof s.craftable === 'boolean') f.elements.craftable.checked = s.craftable;
+    if (typeof s.auto === 'boolean') auto.checked = s.auto;
+    if (s.sort) f.elements.sort.value = s.sort;
+    if (typeof s.q === 'string') f.elements.q.value = s.q;
+    function save() {
+      var t = f.querySelector('input[name=tab]:checked');
+      try {
+        localStorage.setItem(KEY, JSON.stringify({
+          tab: t ? t.value : 'items',
+          stock: f.elements.stock.checked,
+          craftable: f.elements.craftable.checked,
+          auto: auto.checked,
+          sort: f.elements.sort.value,
+          q: f.elements.q.value
+        }));
+      } catch (e) {}
+    }
+    f.addEventListener('change', save);
+    f.addEventListener('input', save);
+    // Typing or switching filters starts from the first page again.
+    f.addEventListener('input', function (e) {
+      if (e.target.id !== 'limit') document.getElementById('limit').value = '{{.Step}}';
+    });
+  })();
+
   function showMore(step) {
     var l = document.getElementById('limit');
     l.value = String(parseInt(l.value, 10) + step);
     htmx.trigger('#filters', 'change');
   }
+
+  // Craft window: AE2-style +/- buttons, close on Esc or click outside.
+  function bump(btn, n) {
+    var input = btn.closest('form').elements.amount;
+    var v = (parseInt(input.value, 10) || 0) + n;
+    input.value = String(Math.max(1, v));
+  }
+  function closeCraft() { document.getElementById('craft').innerHTML = ''; }
+  document.getElementById('craft').addEventListener('click', function (e) {
+    if (e.target === this) closeCraft();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeCraft();
+  });
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail.target.id === 'craft') {
+      var first = e.detail.target.querySelector('input[name=amount], input[name=target]');
+      if (first) first.focus();
+    }
+  });
+
+  // Minecraft-style tooltip for slots: title, then grey lines, mod in blue.
+  (function () {
+    var tip = document.getElementById('tip');
+    var cur = null;
+    function place(x, y) {
+      var w = tip.offsetWidth, h = tip.offsetHeight;
+      var left = x + 14, top = y - 10;
+      if (left + w > window.innerWidth - 4) left = x - w - 14;
+      if (top + h > window.innerHeight - 4) top = window.innerHeight - h - 4;
+      tip.style.left = Math.max(4, left) + 'px';
+      tip.style.top = Math.max(4, top) + 'px';
+    }
+    function show(el) {
+      tip.textContent = '';
+      var t = document.createElement('div');
+      t.className = 'tt';
+      t.textContent = el.dataset.title;
+      tip.appendChild(t);
+      (el.dataset.lines || '').split('\n').forEach(function (line) {
+        if (!line) return;
+        var d = document.createElement('div');
+        d.textContent = line;
+        tip.appendChild(d);
+      });
+      if (el.dataset.mod) {
+        var m = document.createElement('div');
+        m.className = 'tm';
+        m.textContent = el.dataset.mod;
+        tip.appendChild(m);
+      }
+      tip.hidden = false;
+    }
+    document.addEventListener('mouseover', function (e) {
+      var el = e.target.closest('[data-title]');
+      if (el === cur) return;
+      cur = el;
+      if (!el) { tip.hidden = true; return; }
+      show(el);
+      place(e.clientX, e.clientY);
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (cur) place(e.clientX, e.clientY);
+    });
+    document.body.addEventListener('htmx:beforeSwap', function () {
+      cur = null;
+      tip.hidden = true;
+    });
+  })();
 </script>
 </body>
 </html>{{end}}
 
 {{define "status"}}
-{{if .Connected}}<span class="dot on"></span>OC подключён <span class="muted">{{.Client}}</span>{{else}}<span class="dot off"></span>OC не подключён{{end}}
-<span class="sep">·</span> предметов {{num .Items}}, жидкостей {{num .Fluids}}
-<span class="sep">·</span> синхронизация {{ago .LastSync}}
-{{if gt .Power.Max 0.0}}<span class="sep">·</span> энергия ME {{pct .Power.Stored .Power.Max}}%{{end}}
+<span class="lamp {{if .Connected}}on{{else}}off{{end}}" title="{{if .Connected}}{{.Client}}{{end}}">{{if .Connected}}OC в сети{{else}}OC не подключён{{end}}</span>
+<span class="stat">{{num .Items}} предметов, {{num .Fluids}} жидкостей</span>
+<span class="stat">синхронизация {{ago .LastSync}}</span>
+{{if gt .Power.Max 0.0}}<span class="stat power" title="Энергия ME: {{pct .Power.Stored .Power.Max}}%"><span class="meter"><span style="width: {{pct .Power.Stored .Power.Max}}%"></span></span>{{pct .Power.Stored .Power.Max}}%</span>{{end}}
 {{end}}
 
 {{define "items"}}
-{{if not .Items}}<p class="empty">Ничего нет. Если OC не подключён, данных пока не будет.</p>{{end}}
-<div class="grid">
+{{if not .Items}}
+<p class="empty">Здесь пусто. Если лампа OC не горит, запусти <code>mecraft</code> в игре; если горит, проверь фильтры и поиск.</p>
+{{else}}
+<div class="slots">
 {{range .Items}}
-  <div class="card{{if eq .Size 0}} zero{{end}}" title="{{.Label}}&#10;{{.Name}}:{{.Damage}}&#10;{{group .Size}} шт">
+  <button type="button" class="slot{{if eq .Size 0}} zero{{end}}" hx-get="{{itemq .}}" hx-target="#craft"
+          data-title="{{.Label}}" data-mod="{{mod .Name}}"
+          data-lines="{{group .Size}} шт.{{if .Craftable}}&#10;Можно скрафтить{{end}}{{if index $.Ruled .Key}}&#10;Держится уровень{{end}}&#10;{{.Name}}:{{.Damage}}"
+          aria-label="{{.Label}}, {{group .Size}}">
     <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
-    <div class="lbl">{{.Label}}</div>
-    <div class="amt">{{short .Size}}</div>
-    {{if index $.Ruled .Key}}<span class="ruled" title="Держится уровень">●</span>{{end}}
-    {{if .Craftable}}<button class="craft" hx-get="{{itemq .}}" hx-target="#craft" title="Заказать крафт или держать уровень">⚒</button>{{end}}
-  </div>
+    {{if and (eq .Size 0) .Craftable}}<span class="cnt craft">Craft</span>{{else}}<span class="cnt">{{short .Size}}</span>{{end}}
+    {{if index $.Ruled .Key}}<span class="pin" aria-hidden="true"></span>{{end}}
+  </button>
 {{end}}
 </div>
-<p class="muted">Показано {{num .Shown}} из {{num .Total}}
-{{if .More}} <button type="button" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}</p>
+{{end}}
+<footer class="foot">
+  <span>Показано {{num .Shown}} из {{num .Total}}</span>
+  {{if .More}}<button type="button" class="btn" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}
+</footer>
 {{end}}
 
 {{define "fluids"}}
-{{if not .Fluids}}<p class="empty">Жидкостей нет.</p>{{end}}
-<table>
-<thead><tr><th></th><th>Жидкость</th><th class="num">Литров</th><th></th></tr></thead>
-<tbody>
+{{if not .Fluids}}
+<p class="empty">Жидкостей в сети нет.</p>
+{{else}}
+<div class="slots">
 {{range .Fluids}}
-<tr title="{{.Name}}">
-  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
-  <td>{{.Label}}</td>
-  <td class="num">{{group .Amount}}</td>
-  <td>{{if .Craftable}}крафтится{{end}}</td>
-</tr>
+  <div class="slot fluid" tabindex="0" data-title="{{.Label}}" data-mod="{{mod .Name}}"
+       data-lines="{{group .Amount}} л{{if .Craftable}}&#10;Можно скрафтить{{end}}&#10;{{.Name}}" aria-label="{{.Label}}, {{group .Amount}} л">
+    <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
+    <span class="cnt">{{short .Amount}}</span>
+  </div>
 {{end}}
-</tbody>
-</table>
+</div>
+{{end}}
 {{end}}
 
 {{define "cpus"}}
-{{if not .CPUs}}<p class="empty">Процессоров крафта не видно.</p>{{end}}
-<table>
-<thead><tr><th>Процессор</th><th class="num">Память</th><th class="num">Сопроцессоры</th><th>Состояние</th></tr></thead>
-<tbody>
+{{if not .CPUs}}
+<p class="empty">Процессоров крафта не видно. Они появятся, когда OC пришлёт данные.</p>
+{{else}}
+<ul class="rows">
 {{range $i, $c := .CPUs}}
-<tr>
-  <td>{{if $c.Name}}{{$c.Name}}{{else}}#{{$i}}{{end}}</td>
-  <td class="num">{{short $c.Storage}}</td>
-  <td class="num">{{$c.Coprocessors}}</td>
-  <td>{{if $c.Busy}}<span class="busy">занят</span>{{else}}свободен{{end}}</td>
-</tr>
+  <li class="row">
+    <span class="lamp {{if $c.Busy}}busy{{else}}on{{end}}">{{if $c.Busy}}Занят{{else}}Свободен{{end}}</span>
+    <strong class="name">{{if $c.Name}}{{$c.Name}}{{else}}Процессор {{$i}}{{end}}</strong>
+    <span class="stat">память {{short $c.Storage}}</span>
+    <span class="stat">сопроцессоров {{$c.Coprocessors}}</span>
+  </li>
 {{end}}
-</tbody>
-</table>
+</ul>
+{{end}}
 {{end}}
 
 {{define "jobs"}}
-{{if not .Jobs}}<p class="empty">Заказов ещё не было.</p>{{end}}
-<table>
-<thead><tr><th>#</th><th></th><th>Предмет</th><th class="num">Сколько</th><th>Состояние</th><th>Когда</th></tr></thead>
-<tbody>
+{{if not .Jobs}}
+<p class="empty">Заказов ещё не было. Нажми на предмет, который можно скрафтить, и закажи нужное количество.</p>
+{{else}}
+<ul class="rows">
 {{range .Jobs}}
-<tr>
-  <td>{{.ID}}{{if .Auto}} <span class="muted" title="Заказано поддержанием уровня">авто</span>{{end}}</td>
-  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
-  <td>{{.Label}}</td>
-  <td class="num">{{group .Amount}}</td>
-  <td class="st-{{.State}}">{{state .State}}{{if .Reason}} <span class="muted">{{.Reason}}</span>{{end}}</td>
-  <td class="muted">{{ago .Updated}}</td>
-</tr>
+  <li class="row">
+    <span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
+    <span class="name">{{.Label}} <span class="qty">× {{group .Amount}}</span></span>
+    <span class="state st-{{.State}}">{{state .State}}</span>
+    {{if .Reason}}<span class="stat reason">{{.Reason}}</span>{{end}}
+    <span class="stat">#{{.ID}}{{if .Auto}}, по уровню{{end}}, {{ago .Updated}}</span>
+  </li>
 {{end}}
-</tbody>
-</table>
+</ul>
 {{end}}
-
-{{define "craft"}}
-<div class="panel">
-{{if .Item}}
-  <div class="head">
-    <img src="{{icon .Item.Label}}" width="32" height="32" alt="">
-    <strong>{{.Item.Label}}</strong>
-    <span class="muted">в сети {{group .Item.Size}}</span>
-    <button type="button" class="close" onclick="document.getElementById('craft').innerHTML=''">Закрыть</button>
-  </div>
-  {{if .Item.Craftable}}
-  <form hx-post="/craft" hx-target="#craft">
-    <input type="hidden" name="key" value="{{.Item.Key}}">
-    <span class="what">Заказать</span>
-    <input type="number" name="amount" value="{{.Amount}}" min="1" step="1">
-    <button type="submit">Заказать</button>
-  </form>
-  {{end}}
-  <form hx-post="/rules" hx-target="#craft">
-    <input type="hidden" name="key" value="{{.Item.Key}}">
-    <span class="what">Держать</span>
-    <input type="number" name="target" min="1" step="1" placeholder="уровень" value="{{with .Rule}}{{.Target}}{{end}}" title="Если в сети меньше — заказать крафт">
-    <span class="muted">партией</span>
-    <input type="number" name="batch" min="0" step="1" placeholder="недостача" value="{{with .Rule}}{{if .Batch}}{{.Batch}}{{end}}{{end}}" title="Сколько заказывать за раз. Пусто — сколько не хватает до уровня">
-    <label><input type="checkbox" name="enabled" value="1" {{if .Rule}}{{if .Rule.Enabled}}checked{{end}}{{else}}checked{{end}}> включено</label>
-    <button type="submit">{{if .Rule}}Сохранить{{else}}Добавить{{end}}</button>
-    {{if .Rule}}<button type="button" hx-post="/rules/delete" hx-include="closest form" hx-target="#craft">Удалить</button>{{end}}
-  </form>
-  {{if not .Item.Craftable}}<p class="muted">В ME нет шаблона крафта: уровень сохранится, но заказывать нечего.</p>{{end}}
-{{end}}
-{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
-{{if .Done}}<p class="ok">{{.Done}}</p>{{end}}
-</div>
 {{end}}
 
 {{define "rules"}}
-{{if not .Rules}}<p class="empty">Уровней нет. Нажми ⚒ на крафтящемся предмете и задай «Держать».</p>{{end}}
-<table>
-<thead><tr><th></th><th>Предмет</th><th class="num">В сети</th><th class="num">Держать</th><th class="num">Партия</th><th>Состояние</th><th></th></tr></thead>
-<tbody>
+{{if not .Rules}}
+<p class="empty">Уровней пока нет. Нажми на предмет и заполни «Держать уровень» — сервер сам будет заказывать крафт, когда запас упадёт.</p>
+{{else}}
+<ul class="rows">
 {{range .Rules}}
-<tr class="{{if not .Enabled}}off{{else if lt .Have .Target}}low{{end}}">
-  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
-  <td>{{.Label}}</td>
-  <td class="num">{{if .InNet}}{{group .Have}}{{else}}—{{end}}</td>
-  <td class="num">{{group .Target}}</td>
-  <td class="num">{{if .Batch}}{{group .Batch}}{{else}}<span class="muted">недостача</span>{{end}}</td>
-  <td>{{.Note}}</td>
-  <td class="actions">
-    <button type="button" hx-get="{{itemq .Item}}" hx-target="#craft">Изменить</button>
-    <form class="inline" hx-post="/rules/toggle" hx-target="#main">
-      <input type="hidden" name="key" value="{{.Key}}">
-      <input type="hidden" name="on" value="{{if .Enabled}}0{{else}}1{{end}}">
-      <button type="submit">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button>
-    </form>
-  </td>
-</tr>
+  <li class="row rule{{if not .Enabled}} off{{end}}">
+    <span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
+    <span class="name">{{.Label}}</span>
+    <span class="level{{if and .Enabled (lt .Have .Target)}} low{{end}}">
+      <span class="meter"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>
+      {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} / {{group .Target}}
+    </span>
+    <span class="stat">{{if .Batch}}партия {{group .Batch}}{{else}}заказ недостачи{{end}}</span>
+    <span class="stat note">{{.Note}}</span>
+    <span class="acts">
+      <button type="button" class="btn" hx-get="{{itemq .Item}}" hx-target="#craft">Изменить</button>
+      <form hx-post="/rules/toggle" hx-target="#main">
+        <input type="hidden" name="key" value="{{.Key}}">
+        <input type="hidden" name="on" value="{{if .Enabled}}0{{else}}1{{end}}">
+        <button type="submit" class="btn">{{if .Enabled}}Выключить{{else}}Включить{{end}}</button>
+      </form>
+    </span>
+  </li>
 {{end}}
-</tbody>
-</table>
+</ul>
+{{end}}
+{{end}}
+
+{{define "craft"}}
+<div class="window">
+{{if .Item}}
+  <header class="whead">
+    <span class="slot"><img src="{{icon .Item.Label}}" width="32" height="32" alt=""></span>
+    <div>
+      <h2>{{.Item.Label}}</h2>
+      <p class="sub">В сети {{group .Item.Size}} шт. <span class="mod">{{mod .Item.Name}}</span></p>
+    </div>
+    <button type="button" class="btn x" onclick="closeCraft()" aria-label="Закрыть">×</button>
+  </header>
+
+  {{if .Item.Craftable}}
+  <form class="section" hx-post="/craft" hx-target="#craft">
+    <h3>Скрафтить</h3>
+    <input type="hidden" name="key" value="{{.Item.Key}}">
+    <div class="amount">
+      <div class="steps">
+        <button type="button" class="btn" onclick="bump(this,1)">+1</button>
+        <button type="button" class="btn" onclick="bump(this,10)">+10</button>
+        <button type="button" class="btn" onclick="bump(this,100)">+100</button>
+        <button type="button" class="btn" onclick="bump(this,1000)">+1000</button>
+      </div>
+      <input class="field num" type="number" name="amount" value="{{.Amount}}" min="1" step="1" aria-label="Сколько скрафтить">
+      <div class="steps">
+        <button type="button" class="btn" onclick="bump(this,-1)">−1</button>
+        <button type="button" class="btn" onclick="bump(this,-10)">−10</button>
+        <button type="button" class="btn" onclick="bump(this,-100)">−100</button>
+        <button type="button" class="btn" onclick="bump(this,-1000)">−1000</button>
+      </div>
+    </div>
+    <button type="submit" class="btn go">Заказать</button>
+  </form>
+  {{end}}
+
+  <form class="section" hx-post="/rules" hx-target="#craft">
+    <h3>Держать уровень</h3>
+    <input type="hidden" name="key" value="{{.Item.Key}}">
+    <div class="pair">
+      <label>Не меньше
+        <input class="field num" type="number" name="target" min="1" step="1" placeholder="например, 256" value="{{with .Rule}}{{.Target}}{{end}}">
+      </label>
+      <label>Заказывать по
+        <input class="field num" type="number" name="batch" min="0" step="1" placeholder="сколько не хватает" value="{{with .Rule}}{{if .Batch}}{{.Batch}}{{end}}{{end}}">
+      </label>
+    </div>
+    <div class="line">
+      <label class="toggle"><input type="checkbox" name="enabled" value="1" {{if .Rule}}{{if .Rule.Enabled}}checked{{end}}{{else}}checked{{end}}><span>Включено</span></label>
+      <span class="grow"></span>
+      {{if .Rule}}<button type="button" class="btn" hx-post="/rules/delete" hx-include="closest form" hx-target="#craft">Удалить уровень</button>{{end}}
+      <button type="submit" class="btn go">{{if .Rule}}Сохранить уровень{{else}}Держать уровень{{end}}</button>
+    </div>
+    {{if not .Item.Craftable}}<p class="hint">В ME нет шаблона крафта для этого предмета: уровень сохранится, но заказывать будет нечего.</p>{{end}}
+  </form>
+{{else}}
+  <header class="whead"><h2>Предмет не найден</h2><button type="button" class="btn x" onclick="closeCraft()" aria-label="Закрыть">×</button></header>
+{{end}}
+  {{if .Error}}<p class="msg err" role="alert">{{.Error}}</p>{{end}}
+  {{if .Done}}<p class="msg ok" role="status">{{.Done}}</p>{{end}}
+</div>
 {{end}}
