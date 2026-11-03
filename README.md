@@ -28,8 +28,9 @@ OC (oc/mecraft.lua) ──TCP, Lua-таблицы по строкам──► m
    `just icons "<путь к itempanel_icons>"`.
 3. Собери и запусти:
    ```
-   just run
+   just run секрет
    ```
+   `секрет` — пароль для OC; без него берётся `token` из `mecraft.json`.
    Страница: http://localhost:8080
 
 Остальные команды: `just` (список), `just build`, `just build-linux`,
@@ -59,7 +60,11 @@ OC (oc/mecraft.lua) ──TCP, Lua-таблицы по строкам──► m
   записывает их сюда.
 
 Меняешь `http`, `oc`, `token` или `maintainEvery` — перезапусти сервер.
-Другой файл: `mecraft.exe -config путь/к/файлу.json`.
+
+Флаги командной строки важнее файла, но в файл не записываются:
+`-http`, `-oc`, `-token`, `-maintain-every`, например
+`mecraft.exe -token секрет -http :9000`. Другой файл настроек:
+`-config путь/к/файлу.json`.
 
 Без шага 2 всё работает, только вместо иконок будут заглушки.
 

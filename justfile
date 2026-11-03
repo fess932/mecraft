@@ -16,9 +16,9 @@ icons dump=icons_dump:
 build:
     go build -o {{bin}} .
 
-# собрать и запустить сервер; настройки в mecraft.json
-run: build
-    ./{{bin}}
+# собрать и запустить сервер: just run [токен]; остальное в mecraft.json
+run token="": build
+    ./{{bin}} {{ if token != "" { "-token " + quote(token) } else { "" } }}
 
 # иконки + сборка с нуля
 all: icons build

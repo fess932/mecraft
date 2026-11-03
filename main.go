@@ -33,23 +33,44 @@ func sub(f fs.FS, dir string) fs.FS {
 
 func main() {
 	configPath := flag.String("config", "mecraft.json", "settings and stock levels; created with defaults if missing")
+	httpAddr := flag.String("http", "", "address of the web UI (overrides http in the config)")
+	ocAddr := flag.String("oc", "", "address for the OC client (overrides oc in the config)")
+	token := flag.String("token", "", "password the OC client must send (overrides token in the config)")
+	every := flag.String("maintain-every", "", "how often stock levels are checked, e.g. 5s (overrides maintainEvery)")
 	flag.Parse()
 
-	cfg, err := LoadConfig(*configPath)
+	fileCfg, err := LoadConfig(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	every, _ := cfg.Interval()
+	// Flags given on the command line win over the file but are not saved.
+	cfg := fileCfg
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "http":
+			cfg.HTTP = *httpAddr
+		case "oc":
+			cfg.OC = *ocAddr
+		case "token":
+			cfg.Token = *token
+		case "maintain-every":
+			cfg.MaintainEvery = *every
+		}
+	})
+	interval, err := cfg.Interval()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	store := NewStore()
 	hub := NewHub(store, cfg.Token)
-	rules := NewRules(*configPath, cfg)
+	rules := NewRules(*configPath, fileCfg)
 	icons := sub(iconsFS, "assets/icons")
 	web, err := NewWeb(store, hub, LoadIcons(icons), rules, sub(templatesFS, "assets/templates"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	go NewMaintainer(store, hub, rules, every).Run()
+	go NewMaintainer(store, hub, rules, interval).Run()
 
 	go func() {
 		if err := hub.Serve(cfg.OC); err != nil {
