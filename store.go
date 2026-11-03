@@ -77,6 +77,7 @@ type Store struct {
 	client    string
 	lastSync  time.Time
 	lastSeen  time.Time
+	failure   string // why the OC script stopped, until the next full sync
 }
 
 func NewStore() *Store {
@@ -126,9 +127,17 @@ func (s *Store) AddItems(items []Item) {
 	}
 }
 
+// SetFailure records why the OC script stopped.
+func (s *Store) SetFailure(msg string) {
+	s.mu.Lock()
+	s.failure = msg
+	s.mu.Unlock()
+}
+
 func (s *Store) EndItems() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.failure = ""
 	if s.staging != nil {
 		s.items = s.staging
 		s.staging = nil
@@ -365,6 +374,7 @@ type Status struct {
 	LastSync  time.Time
 	LastSeen  time.Time
 	Power     Power
+	Failure   string
 }
 
 func (s *Store) Status() Status {
@@ -378,5 +388,6 @@ func (s *Store) Status() Status {
 		LastSync:  s.lastSync,
 		LastSeen:  s.lastSeen,
 		Power:     s.power,
+		Failure:   s.failure,
 	}
 }

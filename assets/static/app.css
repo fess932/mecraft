@@ -80,6 +80,15 @@ code { font: inherit; background: var(--slot); color: #fff; padding: 0 4px; }
 h1 { margin: 0; font-size: 22px; font-weight: 600; }
 #status { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 14px; }
 .stat { color: var(--ink-soft); font-size: 14px; }
+.failure {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding: 6px 10px;
+  background: #3a0c0c;
+  color: #ffb4a8;
+  border: 2px solid var(--edge);
+  box-shadow: inset 2px 2px 0 #6a1d1d, inset -2px -2px 0 #1d0505;
+}
 
 .lamp { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
 .lamp::before {

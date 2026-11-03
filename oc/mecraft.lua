@@ -47,6 +47,31 @@ local function truthy(v)
   return v == true or v == 1
 end
 
+-- Errors that retrying will not fix stop the script instead of reconnecting.
+local FATAL = {}
+
+local function fatal(msg)
+  error(setmetatable({ msg = msg }, FATAL), 0)
+end
+
+local function isFatal(e)
+  if getmetatable(e) == FATAL then
+    return true
+  end
+  local s = tostring(e)
+  return s:find("not enough memory", 1, true) or s:find("out of memory", 1, true)
+end
+
+local function fatalText(e)
+  local msg = getmetatable(e) == FATAL and e.msg or tostring(e)
+  local text = msg .. string.format(". Память OC: свободно %d КБ из %d КБ",
+    math.floor(computer.freeMemory() / 1024), math.floor(computer.totalMemory() / 1024))
+  if msg:find("memory", 1, true) then
+    text = text .. ". Не хватает памяти: поставь планки побольше (до тира 3.5) или вторую планку"
+  end
+  return text
+end
+
 local function itemOf(s)
   return {
     name = s.name,
@@ -236,30 +261,15 @@ local function fullSync()
     end
   end
 
-  -- The whole list in one call is fast but needs memory for every stack at
-  -- once. If it does not fit, walk the network one stack at a time instead:
-  -- slow (about one stack per tick) but light.
+  -- The whole list arrives as one table, so it needs memory for every
+  -- stack at once. If it does not fit, stop with a clear message.
   local ok, items = pcall(me.getItemsInNetwork)
-  if ok and type(items) == "table" then
-    for i = 1, count(items) do
-      add(items[i])
-      items[i] = nil -- let the collector take stacks already sent
-    end
-  else
-    local reason = tostr(items)
-    items = nil
-    local msg = "список ME не влез в память (" .. reason ..
-      "), читаю по одному — медленно; поставь больше памяти"
-    print("mecraft: " .. msg)
-    send({ type = "log", message = msg })
-    local it = me.allItems()
-    while true do
-      local s = it()
-      if not s then
-        break
-      end
-      add(s)
-    end
+  if not ok or type(items) ~= "table" then
+    fatal("не получил список ME: " .. tostr(items))
+  end
+  for i = 1, count(items) do
+    add(items[i])
+    items[i] = nil -- let the collector take stacks already sent
   end
   if #parts > 0 then
     sendList("items", "items", parts)
@@ -452,6 +462,8 @@ local function interrupted(e)
   return tostring(e):find("interrupted", 1, true) ~= nil
 end
 
+local failure -- set when the script stops because of an error
+
 while true do
   print("mecraft: подключаюсь к " .. HOST .. ":" .. PORT)
   local s, err = connect()
@@ -459,15 +471,20 @@ while true do
   if s then
     sock = s
     local ok, e = pcall(session)
-    pcall(s.close)
-    sock = nil
     if not ok then
       if interrupted(e) then
+        stop = true
+      elseif isFatal(e) then
+        -- Out of memory and the like will not fix themselves: report and stop.
+        failure = fatalText(e)
+        pcall(send, { type = "fail", message = failure })
         stop = true
       else
         print("mecraft: " .. tostring(e))
       end
     end
+    pcall(s.close)
+    sock = nil
   else
     print("mecraft: не подключился: " .. tostring(err))
   end
@@ -480,4 +497,8 @@ event.ignore("network_item_changed", onItems)
 event.ignore("network_fluid_changed", onFluids)
 pcall(me.setItemEventSubscription, false)
 pcall(me.setFluidEventSubscription, false)
+if failure then
+  io.stderr:write("mecraft: ОШИБКА: " .. failure .. "\n")
+  return 1
+end
 print("mecraft: остановлен")

@@ -186,6 +186,9 @@ func (h *Hub) dispatch(m inMsg) {
 		h.store.UpdateJob(m.Job, m.State, m.Reason)
 	case "log":
 		log.Printf("oc says: %s", m.Message)
+	case "fail":
+		log.Printf("oc stopped: %s", m.Message)
+		h.store.SetFailure(m.Message)
 	case "pong", "status":
 	default:
 		log.Printf("oc: unknown message type %q", m.Type)
