@@ -1,0 +1,4 @@
+/assets/icons/*
+!/assets/icons/.gitkeep
+/mecraft
+/mecraft.exe
