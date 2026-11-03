@@ -19,6 +19,7 @@
     <label><input type="radio" name="tab" value="items" checked><span>Предметы</span></label>
     <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
     <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
+    <label><input type="radio" name="tab" value="rules"><span>Уровни</span></label>
     <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
   </nav>
   <div class="bar">
@@ -70,7 +71,8 @@
     <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
     <div class="lbl">{{.Label}}</div>
     <div class="amt">{{short .Size}}</div>
-    {{if .Craftable}}<button class="craft" hx-get="{{itemq .}}" hx-target="#craft" title="Заказать крафт">⚒</button>{{end}}
+    {{if index $.Ruled .Key}}<span class="ruled" title="Держится уровень">●</span>{{end}}
+    {{if .Craftable}}<button class="craft" hx-get="{{itemq .}}" hx-target="#craft" title="Заказать крафт или держать уровень">⚒</button>{{end}}
   </div>
 {{end}}
 </div>
@@ -119,7 +121,7 @@
 <tbody>
 {{range .Jobs}}
 <tr>
-  <td>{{.ID}}</td>
+  <td>{{.ID}}{{if .Auto}} <span class="muted" title="Заказано поддержанием уровня">авто</span>{{end}}</td>
   <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
   <td>{{.Label}}</td>
   <td class="num">{{group .Amount}}</td>
@@ -134,17 +136,60 @@
 {{define "craft"}}
 <div class="panel">
 {{if .Item}}
-  <form hx-post="/craft" hx-target="#craft">
+  <div class="head">
     <img src="{{icon .Item.Label}}" width="32" height="32" alt="">
     <strong>{{.Item.Label}}</strong>
     <span class="muted">в сети {{group .Item.Size}}</span>
+    <button type="button" class="close" onclick="document.getElementById('craft').innerHTML=''">Закрыть</button>
+  </div>
+  {{if .Item.Craftable}}
+  <form hx-post="/craft" hx-target="#craft">
     <input type="hidden" name="key" value="{{.Item.Key}}">
-    <input type="number" name="amount" value="{{.Amount}}" min="1" step="1" autofocus>
+    <span class="what">Заказать</span>
+    <input type="number" name="amount" value="{{.Amount}}" min="1" step="1">
     <button type="submit">Заказать</button>
-    <button type="button" onclick="document.getElementById('craft').innerHTML=''">Закрыть</button>
   </form>
+  {{end}}
+  <form hx-post="/rules" hx-target="#craft">
+    <input type="hidden" name="key" value="{{.Item.Key}}">
+    <span class="what">Держать</span>
+    <input type="number" name="target" min="1" step="1" placeholder="уровень" value="{{with .Rule}}{{.Target}}{{end}}" title="Если в сети меньше — заказать крафт">
+    <span class="muted">партией</span>
+    <input type="number" name="batch" min="0" step="1" placeholder="недостача" value="{{with .Rule}}{{if .Batch}}{{.Batch}}{{end}}{{end}}" title="Сколько заказывать за раз. Пусто — сколько не хватает до уровня">
+    <label><input type="checkbox" name="enabled" value="1" {{if .Rule}}{{if .Rule.Enabled}}checked{{end}}{{else}}checked{{end}}> включено</label>
+    <button type="submit">{{if .Rule}}Сохранить{{else}}Добавить{{end}}</button>
+    {{if .Rule}}<button type="button" hx-post="/rules/delete" hx-include="closest form" hx-target="#craft">Удалить</button>{{end}}
+  </form>
+  {{if not .Item.Craftable}}<p class="muted">В ME нет шаблона крафта: уровень сохранится, но заказывать нечего.</p>{{end}}
 {{end}}
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
 {{if .Done}}<p class="ok">{{.Done}}</p>{{end}}
 </div>
+{{end}}
+
+{{define "rules"}}
+{{if not .Rules}}<p class="empty">Уровней нет. Нажми ⚒ на крафтящемся предмете и задай «Держать».</p>{{end}}
+<table>
+<thead><tr><th></th><th>Предмет</th><th class="num">В сети</th><th class="num">Держать</th><th class="num">Партия</th><th>Состояние</th><th></th></tr></thead>
+<tbody>
+{{range .Rules}}
+<tr class="{{if not .Enabled}}off{{else if lt .Have .Target}}low{{end}}">
+  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
+  <td>{{.Label}}</td>
+  <td class="num">{{if .InNet}}{{group .Have}}{{else}}—{{end}}</td>
+  <td class="num">{{group .Target}}</td>
+  <td class="num">{{if .Batch}}{{group .Batch}}{{else}}<span class="muted">недостача</span>{{end}}</td>
+  <td>{{.Note}}</td>
+  <td class="actions">
+    <button type="button" hx-get="{{itemq .Item}}" hx-target="#craft">Изменить</button>
+    <form class="inline" hx-post="/rules/toggle" hx-target="#main">
+      <input type="hidden" name="key" value="{{.Key}}">
+      <input type="hidden" name="on" value="{{if .Enabled}}0{{else}}1{{end}}">
+      <button type="submit">{{if .Enabled}}Выкл{{else}}Вкл{{end}}</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
 {{end}}

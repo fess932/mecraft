@@ -75,7 +75,10 @@ button:hover { border-color: var(--accent); }
   border: 1px solid var(--line);
   border-radius: 6px;
 }
-.panel form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.panel .head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.panel .close { margin-left: auto; }
+.panel form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.panel .what { width: 70px; color: var(--muted); }
 .panel p { margin: 8px 0 0; }
 #craft:empty { display: none; }
 .err { color: var(--err); }
@@ -119,6 +122,11 @@ th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: lef
 th { color: var(--muted); font-weight: normal; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .busy { color: var(--warn); }
+.ruled { position: absolute; right: 8px; top: 4px; color: var(--ok); font-size: 10px; }
+tr.low td:nth-child(3) { color: var(--warn); }
+tr.off { opacity: 0.55; }
+td.actions { white-space: nowrap; text-align: right; }
+form.inline { display: inline; }
 .st-done { color: var(--ok); }
 .st-failed, .st-lost { color: var(--err); }
 .st-computing, .st-running, .st-sent { color: var(--warn); }

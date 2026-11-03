@@ -1,14 +1,15 @@
 -- mecraft: streams the ME network to the mecraft server and runs its
 -- crafting orders.
 --
--- Needs: Internet Card, an Adapter touching an ME Controller or ME
--- Interface, json.lua in /lib.
+-- Needs: Internet Card and an Adapter touching an ME Controller or ME
+-- Interface. Messages are Lua tables, one per line, written and read with
+-- the built-in serialization library.
 -- Usage: mecraft <host> [port] [token]
 
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
-local json = require("json")
+local serialization = require("serialization")
 
 local args = { ... }
 local HOST = args[1]
@@ -100,7 +101,7 @@ local function connect()
 end
 
 local function send(msg)
-  local data = json.encode(msg) .. "\n"
+  local data = serialization.serialize(msg) .. "\n"
   local pos = 1
   while pos <= #data do
     local n, err = sock.write(data:sub(pos))
@@ -294,8 +295,8 @@ end
 local needResync = false
 
 local function handle(line)
-  local ok, msg = pcall(json.decode, line)
-  if not ok or type(msg) ~= "table" then
+  local msg = serialization.unserialize(line)
+  if type(msg) ~= "table" then
     return
   end
   if msg.type == "craft" then

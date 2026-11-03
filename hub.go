@@ -2,17 +2,18 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
 
-// Wire format: one JSON object per line, both directions.
-// The "type" field selects the message.
+// Wire format: one Lua table literal per line, both directions, as written
+// and read by the OpenOS serialization library. The "type" field selects
+// the message. The json tags name the table fields.
 
 type wireItem struct {
 	Name      string  `json:"name"`
@@ -129,7 +130,7 @@ func (h *Hub) handle(c net.Conn) {
 			return
 		}
 		var m inMsg
-		if err := json.Unmarshal(line, &m); err != nil {
+		if err := UnmarshalLua(strings.TrimSpace(string(line)), &m); err != nil {
 			log.Printf("oc: %s: bad message: %v", addr, err)
 			continue
 		}
@@ -230,20 +231,19 @@ func (h *Hub) detach(c net.Conn) bool {
 	return true
 }
 
-func writeLine(c net.Conn, msg any) error {
-	b, err := json.Marshal(msg)
+func writeLine(c net.Conn, msg map[string]any) error {
+	s, err := MarshalLua(msg)
 	if err != nil {
 		return err
 	}
-	b = append(b, '\n')
 	_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = c.Write(b)
+	_, err = c.Write([]byte(s + "\n"))
 	return err
 }
 
 var errNotConnected = errors.New("OC не подключён")
 
-func (h *Hub) send(msg any) error {
+func (h *Hub) send(msg map[string]any) error {
 	h.mu.Lock()
 	c := h.conn
 	h.mu.Unlock()
@@ -256,14 +256,14 @@ func (h *Hub) send(msg any) error {
 }
 
 // Craft queues a crafting request for it on the OC side.
-func (h *Hub) Craft(it Item, amount int64) (*Job, error) {
+func (h *Hub) Craft(it Item, amount int64, auto bool) (*Job, error) {
 	if !it.Craftable {
 		return nil, fmt.Errorf("%s нельзя скрафтить", it.Label)
 	}
 	if amount <= 0 {
 		return nil, errors.New("количество должно быть больше нуля")
 	}
-	job := h.store.NewJob(it, amount)
+	job := h.store.NewJob(it, amount, auto)
 	err := h.send(map[string]any{
 		"type": "craft", "job": job.ID,
 		"name": it.Name, "damage": it.Damage, "label": it.Label, "amount": amount,

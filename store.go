@@ -53,11 +53,12 @@ type Job struct {
 	Amount  int64
 	State   string
 	Reason  string
+	Auto    bool
 	Created time.Time
 	Updated time.Time
 }
 
-const maxJobs = 100
+const maxJobs = 500
 
 // Store keeps the latest picture of the ME network reported by OC.
 type Store struct {
@@ -200,14 +201,14 @@ func (s *Store) SetPower(p Power) {
 	s.mu.Unlock()
 }
 
-func (s *Store) NewJob(it Item, amount int64) *Job {
+func (s *Store) NewJob(it Item, amount int64, auto bool) *Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextJob++
 	now := time.Now()
 	j := &Job{
 		ID: s.nextJob, Name: it.Name, Damage: it.Damage, Label: it.Label,
-		Amount: amount, State: "sent", Created: now, Updated: now,
+		Amount: amount, State: "sent", Auto: auto, Created: now, Updated: now,
 	}
 	s.jobs = append(s.jobs, j)
 	if len(s.jobs) > maxJobs {
@@ -215,6 +216,17 @@ func (s *Store) NewJob(it Item, amount int64) *Job {
 	}
 	cp := *j
 	return &cp
+}
+
+func (s *Store) Job(id int64) (Job, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.jobs) - 1; i >= 0; i-- {
+		if s.jobs[i].ID == id {
+			return *s.jobs[i], true
+		}
+	}
+	return Job{}, false
 }
 
 func (s *Store) UpdateJob(id int64, state, reason string) {

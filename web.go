@@ -17,13 +17,14 @@ type Web struct {
 	store *Store
 	hub   *Hub
 	icons *Icons
+	rules *Rules
 	tpl   *template.Template
 }
 
 const pageStep = 300
 
-func NewWeb(store *Store, hub *Hub, icons *Icons, templates fs.FS) (*Web, error) {
-	w := &Web{store: store, hub: hub, icons: icons}
+func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS) (*Web, error) {
+	w := &Web{store: store, hub: hub, icons: icons, rules: rules}
 	funcs := template.FuncMap{
 		"icon":  icons.URL,
 		"short": short,
@@ -50,6 +51,9 @@ func (w *Web) Routes(static, icons, oc fs.FS) http.Handler {
 	mux.HandleFunc("GET /craft-form", w.craftForm)
 	mux.HandleFunc("POST /craft", w.craft)
 	mux.HandleFunc("POST /resync", w.resync)
+	mux.HandleFunc("POST /rules", w.saveRule)
+	mux.HandleFunc("POST /rules/delete", w.deleteRule)
+	mux.HandleFunc("POST /rules/toggle", w.toggleRule)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cached(http.FileServerFS(static))))
 	mux.Handle("GET /icons/", http.StripPrefix("/icons/", cached(http.FileServerFS(icons))))
 	mux.Handle("GET /oc/", http.StripPrefix("/oc/", http.FileServerFS(oc)))
@@ -88,6 +92,8 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 		w.render(rw, "cpus", map[string]any{"CPUs": w.store.CPUs()})
 	case "jobs":
 		w.render(rw, "jobs", map[string]any{"Jobs": w.store.Jobs()})
+	case "rules":
+		w.render(rw, "rules", map[string]any{"Rules": w.rules.Views(w.store)})
 	default:
 		limit, _ := strconv.Atoi(q.Get("limit"))
 		if limit <= 0 {
@@ -102,18 +108,106 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 		})
 		w.render(rw, "items", map[string]any{
 			"Items": items, "Total": total, "Shown": len(items),
-			"More": total > len(items), "Step": pageStep,
+			"More": total > len(items), "Step": pageStep, "Ruled": w.rules.Has(),
 		})
 	}
 }
 
+// panelItem finds an item by key in the network, falling back to its rule
+// so that a rule stays editable while the item is absent.
+func (w *Web) panelItem(key string) (Item, bool) {
+	if it, ok := w.store.FindItem(key); ok {
+		return it, true
+	}
+	if r, ok := w.rules.Get(key); ok {
+		return r.Item(), true
+	}
+	return Item{}, false
+}
+
+func (w *Web) panel(rw http.ResponseWriter, it Item, data map[string]any) {
+	data["Item"] = it
+	if _, ok := data["Amount"]; !ok {
+		data["Amount"] = int64(1)
+	}
+	if r, ok := w.rules.Get(it.Key()); ok {
+		data["Rule"] = r
+	}
+	w.render(rw, "craft", data)
+}
+
 func (w *Web) craftForm(rw http.ResponseWriter, r *http.Request) {
-	it, ok := w.store.FindItem(r.URL.Query().Get("key"))
+	it, ok := w.panelItem(r.URL.Query().Get("key"))
 	if !ok {
 		w.render(rw, "craft", map[string]any{"Error": "предмет пропал из сети, обнови список"})
 		return
 	}
-	w.render(rw, "craft", map[string]any{"Item": it, "Amount": 1})
+	w.panel(rw, it, map[string]any{})
+}
+
+func parseCount(s string) (int64, error) {
+	s = strings.ReplaceAll(strings.TrimSpace(s), " ", "")
+	if s == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(s, 10, 64)
+}
+
+func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	it, ok := w.panelItem(r.PostForm.Get("key"))
+	if !ok {
+		w.render(rw, "craft", map[string]any{"Error": "предмет пропал из сети, обнови список"})
+		return
+	}
+	target, err1 := parseCount(r.PostForm.Get("target"))
+	batch, err2 := parseCount(r.PostForm.Get("batch"))
+	if err1 != nil || err2 != nil {
+		w.panel(rw, it, map[string]any{"Error": "уровень и партия — целые числа"})
+		return
+	}
+	rule := Rule{
+		Key: it.Key(), Name: it.Name, Damage: it.Damage, Label: it.Label,
+		Target: target, Batch: batch, Enabled: r.PostForm.Get("enabled") != "",
+	}
+	if err := w.rules.Put(rule); err != nil {
+		w.panel(rw, it, map[string]any{"Error": err.Error()})
+		return
+	}
+	w.panel(rw, it, map[string]any{"Done": "Уровень сохранён"})
+}
+
+func (w *Web) deleteRule(rw http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	key := r.PostForm.Get("key")
+	it, ok := w.panelItem(key)
+	if err := w.rules.Delete(key); err != nil {
+		w.panel(rw, it, map[string]any{"Error": err.Error()})
+		return
+	}
+	if !ok {
+		w.render(rw, "craft", map[string]any{"Done": "Уровень удалён"})
+		return
+	}
+	w.panel(rw, it, map[string]any{"Done": "Уровень удалён"})
+}
+
+func (w *Web) toggleRule(rw http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := w.rules.SetEnabled(r.PostForm.Get("key"), r.PostForm.Get("on") == "1"); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.render(rw, "rules", map[string]any{"Rules": w.rules.Views(w.store)})
 }
 
 func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
@@ -126,19 +220,19 @@ func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
 		w.render(rw, "craft", map[string]any{"Error": "предмет пропал из сети, обнови список"})
 		return
 	}
-	amount, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("amount")), 10, 64)
+	amount, err := parseCount(r.PostForm.Get("amount"))
 	if err != nil || amount <= 0 {
-		w.render(rw, "craft", map[string]any{"Item": it, "Amount": 1, "Error": "введи число больше нуля"})
+		w.panel(rw, it, map[string]any{"Error": "введи число больше нуля"})
 		return
 	}
-	job, err := w.hub.Craft(it, amount)
+	job, err := w.hub.Craft(it, amount, false)
 	if err != nil {
-		w.render(rw, "craft", map[string]any{"Item": it, "Amount": amount, "Error": err.Error()})
+		w.panel(rw, it, map[string]any{"Amount": amount, "Error": err.Error()})
 		return
 	}
-	w.render(rw, "craft", map[string]any{
-		"Item": it, "Amount": amount,
-		"Done": fmt.Sprintf("Заказ #%d: %s × %s отправлен", job.ID, it.Label, group(amount)),
+	w.panel(rw, it, map[string]any{
+		"Amount": amount,
+		"Done":   fmt.Sprintf("Заказ #%d: %s × %s отправлен", job.ID, it.Label, group(amount)),
 	})
 }
 
