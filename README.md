@@ -14,24 +14,29 @@ OC (oc/mecraft.lua) ──TCP, JSON по строкам──► mecraft (Go) �
 
 ## Сервер
 
-Нужен Go 1.24+.
+Нужны Go 1.24+ и [just](https://github.com/casey/just).
 
 1. В игре выгрузи иконки: NEI → Options → Tools → Data Dumps →
    «Панель предметов», переключи формат на **PNG** и нажми «Выгрузить».
    Поиск NEI перед этим очисти, иначе выгрузится только найденное.
 2. Скопируй иконки в репозиторий (в git они не попадают):
    ```
-   go run ./cmd/importicons -src "<.minecraft>/dumps/itempanel_icons"
+   just icons
    ```
+   По умолчанию берётся дамп из инстанса Prism `GT_New_Horizons_2.9.0_Java_17-26`.
+   Другой инстанс: переменная `GTNH_INSTANCE=<путь к .minecraft>` или
+   `just icons "<путь к itempanel_icons>"`.
 3. Собери и запусти:
    ```
-   go build -o mecraft.exe .
-   ./mecraft.exe -http :8080 -oc :7777 -token секрет
+   just run секрет
    ```
    Страница: http://localhost:8080
 
-Флаги: `-http` адрес страницы, `-oc` порт для OC, `-token` пароль, который
-должен прислать OC (пустой — без проверки).
+Остальные команды: `just` (список), `just build`, `just build-linux`,
+`just check`, `just clean`. Порты меняются так: `just http=:9000 oc=:7000 run`.
+
+Флаги бинарника: `-http` адрес страницы, `-oc` порт для OC, `-token` пароль,
+который должен прислать OC (пустой — без проверки).
 
 Без шага 2 всё работает, только вместо иконок будут заглушки.
 
