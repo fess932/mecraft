@@ -1,0 +1,150 @@
+{{define "index"}}<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mecraft</title>
+<link rel="icon" href="/static/unknown.svg">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>mecraft</h1>
+  <div id="status" hx-get="/status" hx-trigger="load, every 2s"></div>
+</header>
+
+<form id="filters" hx-get="/view" hx-target="#main" hx-trigger="input changed delay:300ms from:#q, change">
+  <nav class="tabs">
+    <label><input type="radio" name="tab" value="items" checked><span>Предметы</span></label>
+    <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
+    <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
+    <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
+  </nav>
+  <div class="bar">
+    <input id="q" name="q" type="search" placeholder="Поиск по названию или ID" autocomplete="off">
+    <label><input type="checkbox" name="stock" value="1" checked> в наличии</label>
+    <label><input type="checkbox" name="craftable" value="1"> крафтится</label>
+    <select name="sort">
+      <option value="amount">по количеству</option>
+      <option value="name">по названию</option>
+    </select>
+    <label title="Обновлять каждые 5 секунд"><input type="checkbox" id="auto" checked> авто</label>
+    <button type="button" hx-post="/resync" hx-target="#flash">Синхронизировать</button>
+    <span id="flash"></span>
+    <input type="hidden" id="limit" name="limit" value="{{.Step}}">
+  </div>
+</form>
+
+<div id="craft"></div>
+
+<main id="main" hx-get="/view" hx-include="#filters"
+      hx-trigger="load, every 5s [document.getElementById('auto').checked]"></main>
+
+<script>
+  // Typing or switching filters starts from the first page again.
+  document.getElementById('filters').addEventListener('input', function (e) {
+    if (e.target.id !== 'limit') document.getElementById('limit').value = '{{.Step}}';
+  });
+  function showMore(step) {
+    var l = document.getElementById('limit');
+    l.value = String(parseInt(l.value, 10) + step);
+    htmx.trigger('#filters', 'change');
+  }
+</script>
+</body>
+</html>{{end}}
+
+{{define "status"}}
+{{if .Connected}}<span class="dot on"></span>OC подключён <span class="muted">{{.Client}}</span>{{else}}<span class="dot off"></span>OC не подключён{{end}}
+<span class="sep">·</span> предметов {{num .Items}}, жидкостей {{num .Fluids}}
+<span class="sep">·</span> синхронизация {{ago .LastSync}}
+{{if gt .Power.Max 0.0}}<span class="sep">·</span> энергия ME {{pct .Power.Stored .Power.Max}}%{{end}}
+{{end}}
+
+{{define "items"}}
+{{if not .Items}}<p class="empty">Ничего нет. Если OC не подключён, данных пока не будет.</p>{{end}}
+<div class="grid">
+{{range .Items}}
+  <div class="card{{if eq .Size 0}} zero{{end}}" title="{{.Label}}&#10;{{.Name}}:{{.Damage}}&#10;{{group .Size}} шт">
+    <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
+    <div class="lbl">{{.Label}}</div>
+    <div class="amt">{{short .Size}}</div>
+    {{if .Craftable}}<button class="craft" hx-get="{{itemq .}}" hx-target="#craft" title="Заказать крафт">⚒</button>{{end}}
+  </div>
+{{end}}
+</div>
+<p class="muted">Показано {{num .Shown}} из {{num .Total}}
+{{if .More}} <button type="button" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}</p>
+{{end}}
+
+{{define "fluids"}}
+{{if not .Fluids}}<p class="empty">Жидкостей нет.</p>{{end}}
+<table>
+<thead><tr><th></th><th>Жидкость</th><th class="num">Литров</th><th></th></tr></thead>
+<tbody>
+{{range .Fluids}}
+<tr title="{{.Name}}">
+  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
+  <td>{{.Label}}</td>
+  <td class="num">{{group .Amount}}</td>
+  <td>{{if .Craftable}}крафтится{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+
+{{define "cpus"}}
+{{if not .CPUs}}<p class="empty">Процессоров крафта не видно.</p>{{end}}
+<table>
+<thead><tr><th>Процессор</th><th class="num">Память</th><th class="num">Сопроцессоры</th><th>Состояние</th></tr></thead>
+<tbody>
+{{range $i, $c := .CPUs}}
+<tr>
+  <td>{{if $c.Name}}{{$c.Name}}{{else}}#{{$i}}{{end}}</td>
+  <td class="num">{{short $c.Storage}}</td>
+  <td class="num">{{$c.Coprocessors}}</td>
+  <td>{{if $c.Busy}}<span class="busy">занят</span>{{else}}свободен{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+
+{{define "jobs"}}
+{{if not .Jobs}}<p class="empty">Заказов ещё не было.</p>{{end}}
+<table>
+<thead><tr><th>#</th><th></th><th>Предмет</th><th class="num">Сколько</th><th>Состояние</th><th>Когда</th></tr></thead>
+<tbody>
+{{range .Jobs}}
+<tr>
+  <td>{{.ID}}</td>
+  <td><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></td>
+  <td>{{.Label}}</td>
+  <td class="num">{{group .Amount}}</td>
+  <td class="st-{{.State}}">{{state .State}}{{if .Reason}} <span class="muted">{{.Reason}}</span>{{end}}</td>
+  <td class="muted">{{ago .Updated}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+
+{{define "craft"}}
+<div class="panel">
+{{if .Item}}
+  <form hx-post="/craft" hx-target="#craft">
+    <img src="{{icon .Item.Label}}" width="32" height="32" alt="">
+    <strong>{{.Item.Label}}</strong>
+    <span class="muted">в сети {{group .Item.Size}}</span>
+    <input type="hidden" name="key" value="{{.Item.Key}}">
+    <input type="number" name="amount" value="{{.Amount}}" min="1" step="1" autofocus>
+    <button type="submit">Заказать</button>
+    <button type="button" onclick="document.getElementById('craft').innerHTML=''">Закрыть</button>
+  </form>
+{{end}}
+{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+{{if .Done}}<p class="ok">{{.Done}}</p>{{end}}
+</div>
+{{end}}
