@@ -43,6 +43,9 @@ type Power struct {
 	Max       float64
 	Usage     float64
 	Injection float64
+	// Memory of the OC computer, bytes, as computer.freeMemory/totalMemory.
+	MemFree  float64
+	MemTotal float64
 }
 
 type Job struct {

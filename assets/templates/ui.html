@@ -171,6 +171,7 @@
 <span class="lamp {{if .Connected}}on{{else}}off{{end}}" title="{{if .Connected}}{{.Client}}{{end}}">{{if .Connected}}OC в сети{{else}}OC не подключён{{end}}</span>
 <span class="stat">{{num .Items}} предметов, {{num .Fluids}} жидкостей</span>
 <span class="stat">синхронизация {{ago .LastSync}}</span>
+{{if gt .Power.MemTotal 0.0}}<span class="stat" title="Свободная память компьютера OC">память OC {{kb .Power.MemFree}} из {{kb .Power.MemTotal}} КБ</span>{{end}}
 {{if gt .Power.Max 0.0}}<span class="stat power" title="Энергия ME: {{pct .Power.Stored .Power.Max}}%"><span class="meter"><span style="width: {{pct .Power.Stored .Power.Max}}%"></span></span>{{pct .Power.Stored .Power.Max}}%</span>{{end}}
 {{end}}
 

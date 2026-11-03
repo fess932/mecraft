@@ -71,6 +71,8 @@ type inMsg struct {
 	Max       float64     `json:"max"`
 	Usage     float64     `json:"usage"`
 	Injection float64     `json:"injection"`
+	MemFree   float64     `json:"memFree"`
+	MemTotal  float64     `json:"memTotal"`
 }
 
 // Hub accepts the TCP connection from the OC computer and translates
@@ -176,7 +178,10 @@ func (h *Hub) dispatch(m inMsg) {
 		}
 		h.store.SetCPUs(cpus)
 	case "power":
-		h.store.SetPower(Power{Stored: m.Stored, Max: m.Max, Usage: m.Usage, Injection: m.Injection})
+		h.store.SetPower(Power{
+			Stored: m.Stored, Max: m.Max, Usage: m.Usage, Injection: m.Injection,
+			MemFree: m.MemFree, MemTotal: m.MemTotal,
+		})
 	case "job":
 		h.store.UpdateJob(m.Job, m.State, m.Reason)
 	case "log":

@@ -21,7 +21,7 @@ if not HOST then
   return
 end
 
-local BATCH = 200          -- stacks per message
+local BATCH = 64           -- stacks per message (small: OC memory is tight)
 local FLUSH_EVERY = 0.5    -- seconds between sending accumulated changes
 local STATUS_EVERY = 5     -- seconds between CPU/power reports
 local RESYNC_EVERY = 300   -- seconds between full resyncs (fixes lost events)
@@ -100,8 +100,9 @@ local function connect()
   end
 end
 
-local function send(msg)
-  local data = serialization.serialize(msg) .. "\n"
+-- sendLine writes one already encoded message.
+local function sendLine(data)
+  data = data .. "\n"
   local pos = 1
   while pos <= #data do
     local n, err = sock.write(data:sub(pos))
@@ -113,6 +114,48 @@ local function send(msg)
       os.sleep(0.05)
     end
   end
+end
+
+-- Small messages go through the stock serializer.
+local function send(msg)
+  sendLine(serialization.serialize(msg))
+end
+
+-- Big lists are encoded by hand, one string per stack, in the same format
+-- serialization.serialize writes. That avoids building thousands of tiny
+-- strings per message, which runs small computers out of memory.
+local fmt, tostr = string.format, tostring
+
+local function quote(s)
+  return (fmt("%q", tostr(s)):gsub("\\\n", "\\n"))
+end
+
+local function bool(v)
+  return truthy(v) and "true" or "false"
+end
+
+local function num(v)
+  v = tonumber(v) or 0
+  if v ~= v or v == math.huge or v == -math.huge then
+    return "0"
+  end
+  return tostr(v)
+end
+
+local function encItem(s)
+  return "{name=" .. quote(s.name) .. ",damage=" .. num(s.damage) ..
+    ",label=" .. quote(s.label or s.name) .. ",size=" .. num(s.size) ..
+    ",hasTag=" .. bool(s.hasTag) .. ",isCraftable=" .. bool(s.isCraftable) .. "}"
+end
+
+local function encFluid(s)
+  return "{name=" .. quote(s.name) .. ",label=" .. quote(s.label or s.name) ..
+    ",amount=" .. num(s.amount) .. ",isCraftable=" .. bool(s.isCraftable) .. "}"
+end
+
+-- sendList sends parts (encoded stacks) as {type=typ,field={...}}.
+local function sendList(typ, field, parts)
+  sendLine('{type="' .. typ .. '",' .. field .. "={" .. table.concat(parts, ",") .. "}}")
 end
 
 ------------------------------------------------------------------------
@@ -153,28 +196,28 @@ local function flushDeltas()
   local items, fluids = itemDelta, fluidDelta
   itemDelta, fluidDelta = {}, {}
 
-  local batch = {}
+  local parts = {}
   for _, v in pairs(items) do
     if v.size ~= 0 then
-      batch[#batch + 1] = v
-      if #batch >= BATCH then
-        send({ type = "item_delta", items = batch })
-        batch = {}
+      parts[#parts + 1] = encItem(v)
+      if #parts >= BATCH then
+        sendList("item_delta", "items", parts)
+        parts = {}
       end
     end
   end
-  if #batch > 0 then
-    send({ type = "item_delta", items = batch })
+  if #parts > 0 then
+    sendList("item_delta", "items", parts)
   end
 
-  local fl = {}
+  parts = {}
   for _, v in pairs(fluids) do
     if v.amount ~= 0 then
-      fl[#fl + 1] = v
+      parts[#parts + 1] = encFluid(v)
     end
   end
-  if #fl > 0 then
-    send({ type = "fluid_delta", fluids = fl })
+  if #parts > 0 then
+    sendList("fluid_delta", "fluids", parts)
   end
 end
 
@@ -183,28 +226,54 @@ end
 
 local function fullSync()
   itemDelta, fluidDelta = {}, {}
-  local items = me.getItemsInNetwork()
-  send({ type = "items_begin" })
-  local batch = {}
-  for i = 1, count(items) do
-    batch[#batch + 1] = itemOf(items[i])
-    if #batch >= BATCH then
-      send({ type = "items", items = batch })
-      batch = {}
+  sendLine('{type="items_begin"}')
+  local parts = {}
+  local function add(s)
+    parts[#parts + 1] = encItem(s)
+    if #parts >= BATCH then
+      sendList("items", "items", parts)
+      parts = {}
     end
   end
-  if #batch > 0 then
-    send({ type = "items", items = batch })
+
+  -- The whole list in one call is fast but needs memory for every stack at
+  -- once. If it does not fit, walk the network one stack at a time instead:
+  -- slow (about one stack per tick) but light.
+  local ok, items = pcall(me.getItemsInNetwork)
+  if ok and type(items) == "table" then
+    for i = 1, count(items) do
+      add(items[i])
+      items[i] = nil -- let the collector take stacks already sent
+    end
+  else
+    local reason = tostr(items)
+    items = nil
+    local msg = "список ME не влез в память (" .. reason ..
+      "), читаю по одному — медленно; поставь больше памяти"
+    print("mecraft: " .. msg)
+    send({ type = "log", message = msg })
+    local it = me.allItems()
+    while true do
+      local s = it()
+      if not s then
+        break
+      end
+      add(s)
+    end
   end
-  items = nil
-  send({ type = "items_end" })
+  if #parts > 0 then
+    sendList("items", "items", parts)
+  end
+  items, parts = nil, nil
+  sendLine('{type="items_end"}')
 
   local fluids = me.getFluidsInNetwork()
-  local out = {}
+  parts = {}
   for i = 1, count(fluids) do
-    out[#out + 1] = fluidOf(fluids[i])
+    parts[#parts + 1] = encFluid(fluids[i])
+    fluids[i] = nil
   end
-  send({ type = "fluids", fluids = out })
+  sendList("fluids", "fluids", parts)
 end
 
 local function sendStatus()
@@ -226,6 +295,8 @@ local function sendStatus()
     max = me.getMaxStoredPower(),
     usage = me.getAvgPowerUsage(),
     injection = me.getAvgPowerInjection(),
+    memFree = computer.freeMemory(),
+    memTotal = computer.totalMemory(),
   })
 end
 

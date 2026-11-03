@@ -40,6 +40,7 @@ func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS,
 		"itemq": itemQuery,
 		"num":   func(n int) string { return group(int64(n)) },
 		"float": func(n int64) float64 { return float64(n) },
+		"kb":    func(b float64) int64 { return int64(b / 1024) },
 		"cap100": func(n int) int {
 			return max(0, min(n, 100))
 		},
