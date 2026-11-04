@@ -367,6 +367,12 @@ local function pollJobs()
     local st = j.status
     local state, reason
     local failed, why = st.hasFailed()
+    -- OC bug: saving the world marks every unfinished request as failed
+    -- with the default reason "no link", while AE2 keeps crafting. A real
+    -- failure says "request failed (...)", so trust isDone/isCanceled here.
+    if failed and why == "no link" then
+      failed = false
+    end
     if failed then
       state, reason = "failed", why
     elseif st.isComputing() then
