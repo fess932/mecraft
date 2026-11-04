@@ -146,6 +146,8 @@ h1 { margin: 0; font-size: 22px; font-weight: 500; }
   box-shadow: inset 2px 2px 0 var(--hi);
 }
 .tabs input:focus-visible + span { outline: 2px solid var(--fluix); outline-offset: -4px; }
+/* Sync sits at the end of the tab row: an action, so a button, not a tab. */
+.tabs .sync { flex: none; align-self: center; margin: 0 0 0 auto; }
 
 /* ---- controls ---------------------------------------------------------- */
 

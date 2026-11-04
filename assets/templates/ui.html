@@ -18,6 +18,7 @@
       <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
       <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
       <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
+      <button type="button" class="btn sync" hx-post="/resync" hx-target="#flash" title="Запросить у OC полный список заново">Синхронизировать</button>
     </nav>
 
     <div class="frame">
@@ -35,7 +36,6 @@
           <option value="name">По названию</option>
         </select>
         <label class="toggle only-search" title="Только то, для чего задан уровень"><input type="checkbox" name="ruled" value="1"><span>Уровни</span></label>
-        <button type="button" class="btn" hx-post="/resync" hx-target="#flash" title="Запросить у OC полный список заново">Синхронизировать</button>
         <span id="flash" role="status"></span>
         <input type="hidden" id="limit" name="limit" value="{{.Step}}">
       </div>
