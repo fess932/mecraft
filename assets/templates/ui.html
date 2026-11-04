@@ -43,7 +43,7 @@
   </form>
 
   <main id="main" class="frame body" hx-get="/view" hx-include="#filters"
-        hx-trigger="load, every 5s [!document.getElementById('craft').children.length]"></main>
+        hx-trigger="load, every 5s [!document.getElementById('craft').children.length && !window.tipOpen]"></main>
 </div>
 
 <div id="craft" role="dialog" aria-modal="true"></div>
@@ -149,6 +149,7 @@
       var el = e.target.closest('[data-title]');
       if (el === cur) return;
       cur = el;
+      window.tipOpen = !!el;
       if (!el) { tip.hidden = true; return; }
       show(el);
       place(e.clientX, e.clientY);
@@ -156,9 +157,23 @@
     document.addEventListener('mousemove', function (e) {
       if (cur) place(e.clientX, e.clientY);
     });
-    document.body.addEventListener('htmx:beforeSwap', function () {
-      cur = null;
-      tip.hidden = true;
+    // Leaving the window: no mouseover follows, so close here.
+    document.addEventListener('mouseout', function (e) {
+      if (!e.relatedTarget) {
+        cur = null;
+        window.tipOpen = false;
+        tip.hidden = true;
+      }
+    });
+    // The status line refreshes every 2 s; only a swap that replaces the
+    // hovered slot should hide its tooltip. The slot grid itself does not
+    // refresh while a tooltip is open.
+    document.body.addEventListener('htmx:beforeSwap', function (e) {
+      if (cur && e.detail.target.contains(cur)) {
+        cur = null;
+        window.tipOpen = false;
+        tip.hidden = true;
+      }
     });
   })();
 </script>
