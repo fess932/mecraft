@@ -20,10 +20,11 @@ type Rule struct {
 	Target  int64  `json:"target"`
 	Batch   int64  `json:"batch"`
 	Enabled bool   `json:"enabled"`
+	Fluid   bool   `json:"fluid,omitempty"`
 }
 
 func (r Rule) Item() Item {
-	return Item{Name: r.Name, Damage: r.Damage, Label: r.Label, Craftable: true}
+	return Item{Name: r.Name, Damage: r.Damage, Label: r.Label, Craftable: true, Fluid: r.Fluid}
 }
 
 // ruleState is runtime only: the order in flight and when to try again.

@@ -256,7 +256,6 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 }
 .slot:focus-visible { outline: 2px solid var(--fluix); outline-offset: 0; }
 .slot.zero img { opacity: .55; }
-.slot.fluid { cursor: default; }
 .cnt {
   position: absolute;
   right: 2px; bottom: 0;

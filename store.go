@@ -16,12 +16,27 @@ type Item struct {
 	Size      int64
 	HasTag    bool
 	Craftable bool
+	Fluid     bool // a fluid from the ME network; Size is in litres
 }
 
+const fluidKeyPrefix = "fluid|"
+
 // Key identifies an item type. The label separates NBT variants that share
-// name and damage, because OC does not send the NBT itself.
+// name and damage, because OC does not send the NBT itself. Fluids are
+// identified by name alone.
 func (it Item) Key() string {
+	if it.Fluid {
+		return fluidKeyPrefix + it.Name
+	}
 	return it.Name + "|" + strconv.Itoa(it.Damage) + "|" + it.Label
+}
+
+// Unit is how the amount is counted in the UI.
+func (it Item) Unit() string {
+	if it.Fluid {
+		return "л"
+	}
+	return "шт."
 }
 
 type Fluid struct {
@@ -29,6 +44,12 @@ type Fluid struct {
 	Label     string
 	Amount    int64
 	Craftable bool
+}
+
+// Item lets a fluid go through the same craft window, orders and stock
+// levels as items.
+func (f Fluid) Item() Item {
+	return Item{Name: f.Name, Label: f.Label, Size: f.Amount, Craftable: f.Craftable, Fluid: true}
 }
 
 type CPU struct {
@@ -57,6 +78,7 @@ type Job struct {
 	State   string
 	Reason  string
 	Auto    bool
+	Fluid   bool
 	Created time.Time
 	Updated time.Time
 }
@@ -220,7 +242,7 @@ func (s *Store) NewJob(it Item, amount int64, auto bool) *Job {
 	now := time.Now()
 	j := &Job{
 		ID: s.nextJob, Name: it.Name, Damage: it.Damage, Label: it.Label,
-		Amount: amount, State: "sent", Auto: auto, Created: now, Updated: now,
+		Amount: amount, State: "sent", Auto: auto, Fluid: it.Fluid, Created: now, Updated: now,
 	}
 	s.jobs = append(s.jobs, j)
 	if len(s.jobs) > maxJobs {
@@ -321,9 +343,17 @@ func (s *Store) Items(q ItemQuery) (list []Item, total int) {
 	return list, total
 }
 
+// FindItem finds an item or, for a fluid key, a fluid.
 func (s *Store) FindItem(key string) (Item, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if name, ok := strings.CutPrefix(key, fluidKeyPrefix); ok {
+		f, ok := s.fluids[name]
+		if !ok {
+			return Item{}, false
+		}
+		return f.Item(), true
+	}
 	it, ok := s.items[key]
 	if !ok {
 		return Item{}, false

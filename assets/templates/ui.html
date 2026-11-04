@@ -205,11 +205,14 @@
 {{else}}
 <div class="slots">
 {{range .Fluids}}
-  <div class="slot fluid" tabindex="0" data-title="{{.Label}}" data-mod="{{mod .Name}}"
-       data-lines="{{group .Amount}} л{{if .Craftable}}&#10;Можно скрафтить{{end}}&#10;{{.Name}}" aria-label="{{.Label}}, {{group .Amount}} л">
+  <button type="button" class="slot fluid{{if eq .Amount 0}} zero{{end}}" hx-get="{{itemq .Item}}" hx-target="#craft"
+          data-title="{{.Label}}" data-mod="{{mod .Name}}"
+          data-lines="{{group .Amount}} л{{if .Craftable}}&#10;Можно скрафтить{{end}}{{if index $.Ruled .Item.Key}}&#10;Держится уровень{{end}}&#10;{{.Name}}"
+          aria-label="{{.Label}}, {{group .Amount}} л">
     <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
-    <span class="cnt">{{short .Amount}}</span>
-  </div>
+    {{if and (eq .Amount 0) .Craftable}}<span class="cnt craft">Craft</span>{{else}}<span class="cnt">{{short .Amount}}</span>{{end}}
+    {{if index $.Ruled .Item.Key}}<span class="pin" aria-hidden="true"></span>{{end}}
+  </button>
 {{end}}
 </div>
 {{end}}
@@ -240,7 +243,7 @@
 {{range .Jobs}}
   <li class="row">
     <span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
-    <span class="name">{{.Label}} <span class="qty">× {{group .Amount}}</span></span>
+    <span class="name">{{.Label}} <span class="qty">× {{group .Amount}}{{if .Fluid}} л{{end}}</span></span>
     <span class="state st-{{.State}}">{{state .State}}</span>
     {{if .Reason}}<span class="stat reason">{{.Reason}}</span>{{end}}
     <span class="stat">#{{.ID}}{{if .Auto}}, по уровню{{end}}, {{ago .Updated}}</span>
@@ -261,7 +264,7 @@
     <span class="name">{{.Label}}</span>
     <span class="level{{if and .Enabled (lt .Have .Target)}} low{{end}}">
       <span class="meter"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>
-      {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} / {{group .Target}}
+      {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} / {{group .Target}}{{if .Fluid}} л{{end}}
     </span>
     <span class="stat">{{if .Batch}}партия {{group .Batch}}{{else}}заказ недостачи{{end}}</span>
     <span class="stat note">{{.Note}}</span>
@@ -286,7 +289,7 @@
     <span class="slot"><img src="{{icon .Item.Label}}" width="32" height="32" alt=""></span>
     <div>
       <h2>{{.Item.Label}}</h2>
-      <p class="sub">В сети {{group .Item.Size}} шт. <span class="mod">{{mod .Item.Name}}</span></p>
+      <p class="sub">В сети {{group .Item.Size}} {{.Item.Unit}} <span class="mod">{{mod .Item.Name}}</span></p>
     </div>
     <button type="button" class="btn x" onclick="closeCraft()" aria-label="Закрыть">×</button>
   </header>
@@ -302,7 +305,7 @@
         <button type="button" class="btn" onclick="bump(this,100)">+100</button>
         <button type="button" class="btn" onclick="bump(this,1000)">+1000</button>
       </div>
-      <input class="field num" type="number" name="amount" value="{{.Amount}}" min="1" step="1" aria-label="Сколько скрафтить">
+      <input class="field num" type="number" name="amount" value="{{.Amount}}" min="1" step="1" aria-label="Сколько скрафтить{{if .Item.Fluid}}, литров{{end}}">
       <div class="steps">
         <button type="button" class="btn" onclick="bump(this,-1)">−1</button>
         <button type="button" class="btn" onclick="bump(this,-10)">−10</button>

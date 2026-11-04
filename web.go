@@ -131,7 +131,7 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 	text := q.Get("q")
 	switch q.Get("tab") {
 	case "fluids":
-		w.render(rw, "fluids", map[string]any{"Fluids": w.store.Fluids(text)})
+		w.render(rw, "fluids", map[string]any{"Fluids": w.store.Fluids(text), "Ruled": w.rules.Has()})
 	case "cpus":
 		w.render(rw, "cpus", map[string]any{"CPUs": w.store.CPUs()})
 	case "jobs":
@@ -215,7 +215,7 @@ func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
 	}
 	rule := Rule{
 		Key: it.Key(), Name: it.Name, Damage: it.Damage, Label: it.Label,
-		Target: target, Batch: batch, Enabled: r.PostForm.Get("enabled") != "",
+		Target: target, Batch: batch, Enabled: r.PostForm.Get("enabled") != "", Fluid: it.Fluid,
 	}
 	if err := w.rules.Put(rule); err != nil {
 		w.panel(rw, it, map[string]any{"Error": err.Error()})
@@ -276,7 +276,7 @@ func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
 	}
 	w.panel(rw, it, map[string]any{
 		"Amount": amount,
-		"Done":   fmt.Sprintf("Заказ #%d: %s × %s отправлен", job.ID, it.Label, group(amount)),
+		"Done":   fmt.Sprintf("Заказ #%d: %s × %s %s отправлен", job.ID, it.Label, group(amount), it.Unit()),
 	})
 }
 

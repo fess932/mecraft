@@ -272,10 +272,14 @@ func (h *Hub) Craft(it Item, amount int64, auto bool) (*Job, error) {
 		return nil, errors.New("количество должно быть больше нуля")
 	}
 	job := h.store.NewJob(it, amount, auto)
-	err := h.send(map[string]any{
+	msg := map[string]any{
 		"type": "craft", "job": job.ID,
 		"name": it.Name, "damage": it.Damage, "label": it.Label, "amount": amount,
-	})
+	}
+	if it.Fluid {
+		msg["fluid"] = true
+	}
+	err := h.send(msg)
 	if err != nil {
 		h.store.UpdateJob(job.ID, "failed", err.Error())
 		return nil, err

@@ -315,7 +315,15 @@ end
 
 local jobs = {}
 
-local function craft(msg)
+-- AE2 keeps fluids as their own stack type; OC asks for one by name.
+local function fluidCraftable(name)
+  if not me.getCraftable then
+    return nil, "этот OC не умеет заказывать жидкости (нет getCraftable)"
+  end
+  return me.getCraftable({ name = name }, "fluid"), "нет шаблона на жидкость"
+end
+
+local function itemCraftable(msg)
   local list = me.getCraftables({ name = msg.name, damage = msg.damage })
   local n = count(list)
   local pick
@@ -331,8 +339,18 @@ local function craft(msg)
     end
     pick = pick or list[1]
   end
+  return pick, "нет рецепта"
+end
+
+local function craft(msg)
+  local pick, why
+  if msg.fluid then
+    pick, why = fluidCraftable(msg.name)
+  else
+    pick, why = itemCraftable(msg)
+  end
   if not pick then
-    send({ type = "job", job = msg.job, state = "failed", reason = "нет рецепта" })
+    send({ type = "job", job = msg.job, state = "failed", reason = why })
     return
   end
   local status, err = pick.request(msg.amount or 1)
