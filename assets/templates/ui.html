@@ -16,7 +16,6 @@
     <nav class="tabs" aria-label="Разделы">
       <label><input type="radio" name="tab" value="items" checked><span>Предметы</span></label>
       <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
-      <label><input type="radio" name="tab" value="rules"><span>Уровни</span></label>
       <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
       <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
     </nav>
@@ -35,7 +34,7 @@
           <option value="amount">По количеству</option>
           <option value="name">По названию</option>
         </select>
-        <label class="toggle" title="Обновлять каждые 5 секунд"><input type="checkbox" id="auto" checked><span>Авто</span></label>
+        <label class="toggle only-search" title="Только то, для чего задан уровень"><input type="checkbox" name="ruled" value="1"><span>Уровни</span></label>
         <button type="button" class="btn" hx-post="/resync" hx-target="#flash" title="Запросить у OC полный список заново">Синхронизировать</button>
         <span id="flash" role="status"></span>
         <input type="hidden" id="limit" name="limit" value="{{.Step}}">
@@ -44,7 +43,7 @@
   </form>
 
   <main id="main" class="frame body" hx-get="/view" hx-include="#filters"
-        hx-trigger="load, every 5s [document.getElementById('auto').checked && !document.getElementById('craft').children.length]"></main>
+        hx-trigger="load, every 5s [!document.getElementById('craft').children.length]"></main>
 </div>
 
 <div id="craft" role="dialog" aria-modal="true"></div>
@@ -56,7 +55,6 @@
   (function () {
     var KEY = 'mecraft.ui';
     var f = document.getElementById('filters');
-    var auto = document.getElementById('auto');
     var s = {};
     try { s = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
     if (s.tab) {
@@ -65,7 +63,7 @@
     }
     if (typeof s.stock === 'boolean') f.elements.stock.checked = s.stock;
     if (typeof s.craftable === 'boolean') f.elements.craftable.checked = s.craftable;
-    if (typeof s.auto === 'boolean') auto.checked = s.auto;
+    if (typeof s.ruled === 'boolean') f.elements.ruled.checked = s.ruled;
     if (s.sort) f.elements.sort.value = s.sort;
     if (typeof s.q === 'string') f.elements.q.value = s.q;
     function save() {
@@ -75,7 +73,7 @@
           tab: t ? t.value : 'items',
           stock: f.elements.stock.checked,
           craftable: f.elements.craftable.checked,
-          auto: auto.checked,
+          ruled: f.elements.ruled.checked,
           sort: f.elements.sort.value,
           q: f.elements.q.value
         }));
@@ -176,46 +174,30 @@
 {{if gt .Power.Max 0.0}}<span class="stat power" title="Энергия ME: {{pct .Power.Stored .Power.Max}}%"><span class="meter"><span style="width: {{pct .Power.Stored .Power.Max}}%"></span></span>{{pct .Power.Stored .Power.Max}}%</span>{{end}}
 {{end}}
 
-{{define "items"}}
+{{define "slots"}}
 {{if not .Items}}
-<p class="empty">Здесь пусто. Если лампа OC не горит, запусти <code>mecraft</code> в игре; если горит, проверь фильтры и поиск.</p>
+<p class="empty">{{if .Ruled}}Уровней пока нет. Нажми на {{if .Fluids}}жидкость{{else}}предмет{{end}} и заполни «Держать уровень» — сервер сам будет заказывать крафт, когда запас упадёт.{{else if .Fluids}}Жидкостей в сети нет.{{else}}Здесь пусто. Если лампа OC не горит, запусти <code>mecraft</code> в игре; если горит, проверь фильтры и поиск.{{end}}</p>
 {{else}}
 <div class="slots">
 {{range .Items}}
+  {{$lv := index $.Levels .Key}}
   <button type="button" class="slot{{if eq .Size 0}} zero{{end}}" hx-get="{{itemq .}}" hx-target="#craft"
           data-title="{{.Label}}" data-mod="{{mod .Name}}"
-          data-lines="{{group .Size}} шт.{{if .Craftable}}&#10;Можно скрафтить{{end}}{{if index $.Ruled .Key}}&#10;Держится уровень{{end}}&#10;{{.Name}}:{{.Damage}}"
-          aria-label="{{.Label}}, {{group .Size}}">
+          data-lines="{{group .Size}} {{.Unit}}{{if .Craftable}}&#10;Можно скрафтить{{end}}{{with $lv}}&#10;Уровень: {{group .Have}} / {{group .Target}}{{if not .Enabled}}, выключен{{end}}&#10;{{.Note}}{{end}}&#10;{{.Name}}{{if not .Fluid}}:{{.Damage}}{{end}}"
+          aria-label="{{.Label}}, {{group .Size}} {{.Unit}}">
     <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
     {{if and (eq .Size 0) .Craftable}}<span class="cnt craft">Craft</span>{{else}}<span class="cnt">{{short .Size}}</span>{{end}}
-    {{if index $.Ruled .Key}}<span class="pin" aria-hidden="true"></span>{{end}}
+    {{with $lv}}<span class="lvl{{if not .Enabled}} off{{else if lt .Have .Target}} low{{end}}" aria-hidden="true"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>{{end}}
   </button>
 {{end}}
 </div>
 {{end}}
+{{if not .Fluids}}{{if not .Ruled}}
 <footer class="foot">
   <span>Показано {{num .Shown}} из {{num .Total}}</span>
   {{if .More}}<button type="button" class="btn" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}
 </footer>
-{{end}}
-
-{{define "fluids"}}
-{{if not .Fluids}}
-<p class="empty">Жидкостей в сети нет.</p>
-{{else}}
-<div class="slots">
-{{range .Fluids}}
-  <button type="button" class="slot fluid{{if eq .Amount 0}} zero{{end}}" hx-get="{{itemq .Item}}" hx-target="#craft"
-          data-title="{{.Label}}" data-mod="{{mod .Name}}"
-          data-lines="{{group .Amount}} л{{if .Craftable}}&#10;Можно скрафтить{{end}}{{if index $.Ruled .Item.Key}}&#10;Держится уровень{{end}}&#10;{{.Name}}"
-          aria-label="{{.Label}}, {{group .Amount}} л">
-    <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
-    {{if and (eq .Amount 0) .Craftable}}<span class="cnt craft">Craft</span>{{else}}<span class="cnt">{{short .Amount}}</span>{{end}}
-    {{if index $.Ruled .Item.Key}}<span class="pin" aria-hidden="true"></span>{{end}}
-  </button>
-{{end}}
-</div>
-{{end}}
+{{end}}{{end}}
 {{end}}
 
 {{define "cpus"}}
@@ -247,35 +229,6 @@
     <span class="state st-{{.State}}">{{state .State}}</span>
     {{if .Reason}}<span class="stat reason">{{.Reason}}</span>{{end}}
     <span class="stat">#{{.ID}}{{if .Auto}}, по уровню{{end}}, {{ago .Updated}}</span>
-  </li>
-{{end}}
-</ul>
-{{end}}
-{{end}}
-
-{{define "rules"}}
-{{if not .Rules}}
-<p class="empty">Уровней пока нет. Нажми на предмет и заполни «Держать уровень» — сервер сам будет заказывать крафт, когда запас упадёт.</p>
-{{else}}
-<ul class="rows">
-{{range .Rules}}
-  <li class="row rule{{if not .Enabled}} off{{end}}">
-    <span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
-    <span class="name">{{.Label}}</span>
-    <span class="level{{if and .Enabled (lt .Have .Target)}} low{{end}}">
-      <span class="meter"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>
-      {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} / {{group .Target}}{{if .Fluid}} л{{end}}
-    </span>
-    <span class="stat">{{if .Batch}}партия {{group .Batch}}{{else}}заказ недостачи{{end}}</span>
-    <span class="stat note">{{.Note}}</span>
-    <span class="acts">
-      <button type="button" class="btn" hx-get="{{itemq .Item}}" hx-target="#craft">Изменить</button>
-      <form hx-post="/rules/toggle" hx-target="#main">
-        <input type="hidden" name="key" value="{{.Key}}">
-        <input type="hidden" name="on" value="{{if .Enabled}}0{{else}}1{{end}}">
-        <button type="submit" class="btn">{{if .Enabled}}Выключить{{else}}Включить{{end}}</button>
-      </form>
-    </span>
   </li>
 {{end}}
 </ul>
@@ -319,6 +272,7 @@
 
   <form class="section" hx-post="/rules" hx-target="#craft">
     <h3>Держать уровень</h3>
+    {{with .Level}}<p class="sub level{{if and .Enabled (lt .Have .Target)}} low{{end}}">Сейчас {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} из {{group .Target}}{{if .Note}}: {{.Note}}{{end}}</p>{{end}}
     <input type="hidden" name="key" value="{{.Item.Key}}">
     <div class="pair">
       <label>Не меньше

@@ -217,8 +217,10 @@ select.btn option { background: #fff; color: #000; text-shadow: none; }
 
 #flash .flash { color: var(--ink-soft); font-size: 14px; }
 
-/* Item filters only make sense on the items tab, search on items and fluids. */
-#filters:not(:has(input[name=tab][value=items]:checked)) .only-items { display: none; }
+/* Item filters only make sense on the items tab, search and levels on items
+   and fluids. The levels filter shows every ruled entry, so it hides the rest. */
+#filters:not(:has(input[name=tab][value=items]:checked)) .only-items,
+#filters:has(input[name=ruled]:checked) .only-items { display: none; }
 #filters:not(:has(input[name=tab][value=items]:checked)):not(:has(input[name=tab][value=fluids]:checked)) .only-search { display: none; }
 
 input[type=number] { -moz-appearance: textfield; appearance: textfield; }
@@ -267,13 +269,17 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   pointer-events: none;
 }
 .cnt.craft { color: #fff6a0; font-size: 11px; }
-.pin {
+/* Stock level: a thin gauge along the top of the slot. */
+.lvl {
   position: absolute;
-  left: 3px; top: 3px;
-  width: 6px; height: 6px;
-  background: var(--fluix);
-  border: 1px solid #1d1240;
+  left: 3px; right: 3px; top: 3px;
+  height: 4px;
+  background: #2b2b2b;
+  pointer-events: none;
 }
+.lvl > span { display: block; height: 100%; background: var(--fluix); }
+.lvl.low > span { background: #f0b232; }
+.lvl.off > span { background: #6a6a6a; }
 .slot.mini { width: 36px; height: 36px; cursor: default; flex: none; }
 .slot.mini::after { display: none; }
 
@@ -288,7 +294,7 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 
 .empty { margin: 24px 6px; max-width: 64ch; color: var(--ink); }
 
-/* ---- lists: jobs, levels, CPUs ---------------------------------------- */
+/* ---- lists: jobs, CPUs ---------------------------------------- */
 
 .rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .row {
@@ -300,7 +306,6 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   background: #b4b4b4;
   box-shadow: inset 1px 1px 0 #d9d9d9, inset -1px -1px 0 #8a8a8a;
 }
-.row.off { opacity: .6; }
 .row .name { flex: 1 1 200px; min-width: 0; }
 .row .qty { color: var(--ink-soft); }
 .state { font-weight: 500; }
@@ -311,22 +316,6 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .level { white-space: nowrap; }
 .level.low { color: var(--warn); }
 .level.low .meter > span { background: #f0b232; }
-.note { flex: 1 1 180px; }
-.acts { display: flex; gap: 6px; justify-content: flex-end; }
-
-/* Level rows line up in columns so the buttons never wrap under a name. */
-.row.rule {
-  display: grid;
-  grid-template-columns: 36px minmax(160px, 1.5fr) max-content max-content minmax(100px, 1fr) auto;
-}
-.row.rule .name, .row.rule .note { flex: none; }
-@media (max-width: 900px) {
-  .row.rule { grid-template-columns: 36px 1fr; }
-  .row.rule > :not(.slot) { grid-column: 2; }
-  .row.rule .acts { justify-content: flex-start; }
-}
-.acts form { margin: 0; }
-
 /* ---- craft window ------------------------------------------------------ */
 
 #craft:empty { display: none; }

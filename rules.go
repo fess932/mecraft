@@ -38,11 +38,12 @@ type ruleState struct {
 // RuleView is a rule with its live state, for the UI.
 type RuleView struct {
 	Rule
-	Have    int64
-	InNet   bool
-	Note    string
-	JobID   int64
-	Ordered time.Time
+	Have      int64
+	InNet     bool
+	Craftable bool
+	Note      string
+	JobID     int64
+	Ordered   time.Time
 }
 
 // Rules holds the stock levels and writes them back into the config file
@@ -92,12 +93,12 @@ func (rs *Rules) Get(key string) (Rule, bool) {
 	return *r, true
 }
 
-func (rs *Rules) Has() map[string]bool {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	out := make(map[string]bool, len(rs.rules))
-	for k, r := range rs.rules {
-		out[k] = r.Enabled
+// Levels returns the live state of every rule by key.
+func (rs *Rules) Levels(store *Store) map[string]*RuleView {
+	views := rs.Views(store)
+	out := make(map[string]*RuleView, len(views))
+	for i := range views {
+		out[views[i].Key] = &views[i]
 	}
 	return out
 }
@@ -177,7 +178,7 @@ func (rs *Rules) Views(store *Store) []RuleView {
 	rs.mu.Unlock()
 	for i := range out {
 		if it, ok := store.FindItem(out[i].Key); ok {
-			out[i].Have, out[i].InNet = it.Size, true
+			out[i].Have, out[i].InNet, out[i].Craftable = it.Size, true, it.Craftable
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

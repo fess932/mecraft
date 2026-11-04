@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -70,7 +71,6 @@ func (w *Web) Routes(static, icons, oc fs.FS) http.Handler {
 	mux.HandleFunc("POST /resync", w.resync)
 	mux.HandleFunc("POST /rules", w.saveRule)
 	mux.HandleFunc("POST /rules/delete", w.deleteRule)
-	mux.HandleFunc("POST /rules/toggle", w.toggleRule)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cached(http.FileServerFS(static))))
 	mux.Handle("GET /icons/", http.StripPrefix("/icons/", cached(http.FileServerFS(icons))))
 	mux.Handle("GET /oc/", http.StripPrefix("/oc/", http.FileServerFS(oc)))
@@ -129,32 +129,70 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request) {
 func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	text := q.Get("q")
-	switch q.Get("tab") {
-	case "fluids":
-		w.render(rw, "fluids", map[string]any{"Fluids": w.store.Fluids(text), "Ruled": w.rules.Has()})
+	tab := q.Get("tab")
+	switch tab {
 	case "cpus":
 		w.render(rw, "cpus", map[string]any{"CPUs": w.store.CPUs()})
+		return
 	case "jobs":
 		w.render(rw, "jobs", map[string]any{"Jobs": w.store.Jobs()})
-	case "rules":
-		w.render(rw, "rules", map[string]any{"Rules": w.rules.Views(w.store)})
+		return
+	}
+
+	fluids := tab == "fluids"
+	levels := w.rules.Levels(w.store)
+	var items []Item
+	var total int
+	switch {
+	case q.Get("ruled") != "":
+		// Everything with a stock level, in the network or not; the other
+		// filters would only hide the very entries asked for.
+		items = levelItems(levels, fluids, text)
+		total = len(items)
+	case fluids:
+		for _, f := range w.store.Fluids(text) {
+			items = append(items, f.Item())
+		}
+		total = len(items)
 	default:
 		limit, _ := strconv.Atoi(q.Get("limit"))
 		if limit <= 0 {
 			limit = pageStep
 		}
-		items, total := w.store.Items(ItemQuery{
+		items, total = w.store.Items(ItemQuery{
 			Text:          text,
 			CraftableOnly: q.Get("craftable") != "",
 			InStockOnly:   q.Get("stock") != "",
 			SortByName:    q.Get("sort") == "name",
 			Limit:         limit,
 		})
-		w.render(rw, "items", map[string]any{
-			"Items": items, "Total": total, "Shown": len(items),
-			"More": total > len(items), "Step": pageStep, "Ruled": w.rules.Has(),
-		})
 	}
+	w.render(rw, "slots", map[string]any{
+		"Items": items, "Total": total, "Shown": len(items),
+		"More": total > len(items), "Step": pageStep, "Levels": levels,
+		"Fluids": fluids, "Ruled": q.Get("ruled") != "",
+	})
+}
+
+// levelItems lists the items (or fluids) that have a stock level.
+func levelItems(levels map[string]*RuleView, fluids bool, text string) []Item {
+	text = strings.ToLower(strings.TrimSpace(text))
+	var out []Item
+	for _, v := range levels {
+		if v.Fluid != fluids || !matches(text, v.Label, v.Name) {
+			continue
+		}
+		it := v.Item()
+		it.Size, it.Craftable = v.Have, v.InNet && v.Craftable
+		out = append(out, it)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Label != out[j].Label {
+			return out[i].Label < out[j].Label
+		}
+		return out[i].Key() < out[j].Key()
+	})
+	return out
 }
 
 // panelItem finds an item by key in the network, falling back to its rule
@@ -176,6 +214,7 @@ func (w *Web) panel(rw http.ResponseWriter, it Item, data map[string]any) {
 	}
 	if r, ok := w.rules.Get(it.Key()); ok {
 		data["Rule"] = r
+		data["Level"] = w.rules.Levels(w.store)[it.Key()]
 	}
 	w.render(rw, "craft", data)
 }
@@ -240,18 +279,6 @@ func (w *Web) deleteRule(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.panel(rw, it, map[string]any{"Done": "Уровень удалён"})
-}
-
-func (w *Web) toggleRule(rw http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := w.rules.SetEnabled(r.PostForm.Get("key"), r.PostForm.Get("on") == "1"); err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.render(rw, "rules", map[string]any{"Rules": w.rules.Views(w.store)})
 }
 
 func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
