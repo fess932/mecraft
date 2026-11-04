@@ -219,10 +219,8 @@ select.btn option { background: #fff; color: #000; text-shadow: none; }
 
 #flash .flash { color: var(--ink-soft); font-size: 14px; }
 
-/* Filters work on items and fluids alike. The levels filter shows every
-   ruled entry, so it hides the stock and craftable filters. */
-#filters:not(:has(input[name=tab][value=items]:checked)):not(:has(input[name=tab][value=fluids]:checked)) .only-search,
-#filters:has(input[name=ruled]:checked) .not-levels { display: none; }
+/* Filters work on items and fluids alike. */
+#filters:not(:has(input[name=tab][value=items]:checked)):not(:has(input[name=tab][value=fluids]:checked)) .only-search { display: none; }
 
 input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 input[type=number]::-webkit-inner-spin-button,

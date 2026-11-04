@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -141,31 +140,28 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 
 	fluids := tab == "fluids"
 	levels := w.rules.Levels(w.store)
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 {
+		limit = pageStep
+	}
+	query := ItemQuery{
+		Text:          text,
+		CraftableOnly: q.Get("craftable") != "",
+		InStockOnly:   q.Get("stock") != "",
+		SortByName:    q.Get("sort") == "name",
+		Limit:         limit,
+	}
 	var items []Item
 	var total int
 	switch {
 	case q.Get("ruled") != "":
-		// Everything with a stock level, in the network or not; the other
-		// filters would only hide the very entries asked for.
-		items = levelItems(levels, fluids, text)
-		total = len(items)
+		// The levels filter narrows the list like the others and stacks
+		// with them.
+		items, total = query.Filter(levelItems(levels, fluids))
+	case fluids:
+		items, total = w.store.FluidItems(query)
 	default:
-		limit, _ := strconv.Atoi(q.Get("limit"))
-		if limit <= 0 {
-			limit = pageStep
-		}
-		query := ItemQuery{
-			Text:          text,
-			CraftableOnly: q.Get("craftable") != "",
-			InStockOnly:   q.Get("stock") != "",
-			SortByName:    q.Get("sort") == "name",
-			Limit:         limit,
-		}
-		if fluids {
-			items, total = w.store.FluidItems(query)
-		} else {
-			items, total = w.store.Items(query)
-		}
+		items, total = w.store.Items(query)
 	}
 	w.render(rw, "slots", map[string]any{
 		"Items": items, "Total": total, "Shown": len(items),
@@ -174,24 +170,18 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// levelItems lists the items (or fluids) that have a stock level.
-func levelItems(levels map[string]*RuleView, fluids bool, text string) []Item {
-	text = strings.ToLower(strings.TrimSpace(text))
+// levelItems lists the items (or fluids) that have a stock level, also
+// those missing from the network.
+func levelItems(levels map[string]*RuleView, fluids bool) []Item {
 	var out []Item
 	for _, v := range levels {
-		if v.Fluid != fluids || !matches(text, v.Label, v.Name) {
+		if v.Fluid != fluids {
 			continue
 		}
 		it := v.Item()
 		it.Size, it.Craftable = v.Have, v.InNet && v.Craftable
 		out = append(out, it)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Label != out[j].Label {
-			return out[i].Label < out[j].Label
-		}
-		return out[i].Key() < out[j].Key()
-	})
 	return out
 }
 

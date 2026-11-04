@@ -345,6 +345,18 @@ func (s *Store) FluidItems(q ItemQuery) (list []Item, total int) {
 	return q.page(list)
 }
 
+// Filter applies the query to a ready list.
+func (q ItemQuery) Filter(in []Item) ([]Item, int) {
+	text := strings.ToLower(strings.TrimSpace(q.Text))
+	var list []Item
+	for _, it := range in {
+		if q.keep(it, text) {
+			list = append(list, it)
+		}
+	}
+	return q.page(list)
+}
+
 // page sorts the filtered list and cuts it to the limit.
 func (q ItemQuery) page(list []Item) ([]Item, int) {
 	sort.Slice(list, func(i, j int) bool {
