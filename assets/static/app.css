@@ -39,7 +39,7 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 body {
   margin: 0;
   padding: 24px 16px 48px;
@@ -50,10 +50,13 @@ body {
     var(--backdrop);
   color: var(--ink);
   font: 16px/1.35 var(--font);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
 }
 img { image-rendering: pixelated; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--fluix); outline-offset: 2px; }
+strong, b { font-weight: 400; }
 code { font: inherit; background: var(--slot); color: #fff; padding: 0 4px; }
 
 /* ---- terminal window ------------------------------------------------- */
@@ -77,7 +80,7 @@ code { font: inherit; background: var(--slot); color: #fff; padding: 0 4px; }
   gap: 6px 16px;
   margin-bottom: 10px;
 }
-h1 { margin: 0; font-size: 22px; font-weight: 600; }
+h1 { margin: 0; font-size: 22px; font-weight: 400; }
 #status { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 14px; }
 .stat { color: var(--ink-soft); font-size: 14px; }
 .failure {
@@ -167,7 +170,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 600; }
 .btn {
   background: #8e8e8e;
   color: #fff;
-  text-shadow: 2px 2px 0 #3f3f3f;
+  text-shadow: 1px 1px 0 #3f3f3f;
   border: 2px solid var(--edge);
   box-shadow: inset 2px 2px 0 #c0c0c0, inset -2px -2px 0 #5a5a5a;
   padding: 5px 12px;
@@ -257,9 +260,9 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   right: 2px; bottom: 0;
   color: #fff;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
   line-height: 1;
-  text-shadow: 1px 1px 0 #3f3f3f, 2px 2px 0 #1f1f1f;
+  text-shadow: 1px 1px 0 #1f1f1f;
   pointer-events: none;
 }
 .cnt.craft { color: #fff6a0; font-size: 11px; }
@@ -299,7 +302,7 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .row.off { opacity: .6; }
 .row .name { flex: 1 1 200px; min-width: 0; }
 .row .qty { color: var(--ink-soft); }
-.state { font-weight: 600; }
+.state { font-weight: 400; }
 .st-done { color: var(--ok); }
 .st-failed, .st-lost, .st-canceled { color: var(--err); }
 .st-computing, .st-running, .st-sent { color: var(--warn); }
@@ -349,13 +352,13 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .whead .slot { cursor: default; flex: none; }
 .whead .slot::after { display: none; }
 .whead > div { flex: 1; min-width: 0; }
-.whead h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; flex: 1; }
+.whead h2 { margin: 0; font-size: 20px; font-weight: 400; line-height: 1.2; overflow-wrap: anywhere; flex: 1; }
 .sub { margin: 2px 0 0; color: var(--ink-soft); font-size: 14px; }
 .mod { color: #3b3bd6; font-style: italic; }
 .btn.x { align-self: flex-start; padding: 0 9px; font-size: 20px; line-height: 28px; }
 
 .section { margin-top: 14px; padding-top: 12px; border-top: 2px solid #a0a0a0; }
-.section h3 { margin: 0 0 10px; font-size: 16px; font-weight: 600; }
+.section h3 { margin: 0 0 10px; font-size: 16px; font-weight: 400; }
 .amount { display: grid; gap: 6px; }
 .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .steps .btn { padding: 4px 0; }
