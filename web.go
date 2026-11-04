@@ -250,7 +250,7 @@ func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
 		w.panel(rw, it, map[string]any{"Error": err.Error()})
 		return
 	}
-	w.panel(rw, it, map[string]any{"Done": "Уровень сохранён"})
+	w.closePanel(rw, fmt.Sprintf("Уровень сохранён: %s, не меньше %s %s", it.Label, group(target), it.Unit()))
 }
 
 func (w *Web) deleteRule(rw http.ResponseWriter, r *http.Request) {
@@ -265,10 +265,10 @@ func (w *Web) deleteRule(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		w.render(rw, "craft", map[string]any{"Done": "Уровень удалён"})
+		w.closePanel(rw, "Уровень удалён")
 		return
 	}
-	w.panel(rw, it, map[string]any{"Done": "Уровень удалён"})
+	w.closePanel(rw, "Уровень удалён: "+it.Label)
 }
 
 func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
@@ -291,10 +291,14 @@ func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
 		w.panel(rw, it, map[string]any{"Amount": amount, "Error": err.Error()})
 		return
 	}
-	// The order is placed: close the window (empty #craft) and report it
-	// in the bar instead.
-	msg := fmt.Sprintf("Заказ #%d: %s × %s %s отправлен", job.ID, it.Label, group(amount), it.Unit())
+	w.closePanel(rw, fmt.Sprintf("Заказ #%d: %s × %s %s отправлен", job.ID, it.Label, group(amount), it.Unit()))
+}
+
+// closePanel answers a finished action: the window closes (empty #craft),
+// msg goes to the bar and the slot grid reloads to show the change.
+func (w *Web) closePanel(rw http.ResponseWriter, msg string) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rw.Header().Set("HX-Trigger", "reload")
 	fmt.Fprintf(rw, `<span id="flash" role="status" hx-swap-oob="true"><span class="flash">%s</span></span>`,
 		template.HTMLEscapeString(msg))
 }
