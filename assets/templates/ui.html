@@ -28,9 +28,9 @@
 
       <div class="bar">
         <input id="q" class="field only-search" name="q" type="search" placeholder="Поиск" autocomplete="off" aria-label="Поиск по названию или ID">
-        <label class="toggle only-items"><input type="checkbox" name="stock" value="1" checked><span>В наличии</span></label>
-        <label class="toggle only-items"><input type="checkbox" name="craftable" value="1"><span>Крафтится</span></label>
-        <select class="btn only-items" name="sort" aria-label="Сортировка">
+        <label class="toggle only-search not-levels"><input type="checkbox" name="stock" value="1" checked><span>В наличии</span></label>
+        <label class="toggle only-search not-levels"><input type="checkbox" name="craftable" value="1"><span>Крафтится</span></label>
+        <select class="btn only-search not-levels" name="sort" aria-label="Сортировка">
           <option value="amount">По количеству</option>
           <option value="name">По названию</option>
         </select>
@@ -192,12 +192,12 @@
 {{end}}
 </div>
 {{end}}
-{{if not .Fluids}}{{if not .Ruled}}
+{{if not .Ruled}}
 <footer class="foot">
   <span>Показано {{num .Shown}} из {{num .Total}}</span>
   {{if .More}}<button type="button" class="btn" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}
 </footer>
-{{end}}{{end}}
+{{end}}
 {{end}}
 
 {{define "cpus"}}

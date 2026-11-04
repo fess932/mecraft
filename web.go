@@ -149,23 +149,23 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 		// filters would only hide the very entries asked for.
 		items = levelItems(levels, fluids, text)
 		total = len(items)
-	case fluids:
-		for _, f := range w.store.Fluids(text) {
-			items = append(items, f.Item())
-		}
-		total = len(items)
 	default:
 		limit, _ := strconv.Atoi(q.Get("limit"))
 		if limit <= 0 {
 			limit = pageStep
 		}
-		items, total = w.store.Items(ItemQuery{
+		query := ItemQuery{
 			Text:          text,
 			CraftableOnly: q.Get("craftable") != "",
 			InStockOnly:   q.Get("stock") != "",
 			SortByName:    q.Get("sort") == "name",
 			Limit:         limit,
-		})
+		}
+		if fluids {
+			items, total = w.store.FluidItems(query)
+		} else {
+			items, total = w.store.Items(query)
+		}
 	}
 	w.render(rw, "slots", map[string]any{
 		"Items": items, "Total": total, "Shown": len(items),
@@ -301,10 +301,12 @@ func (w *Web) craft(rw http.ResponseWriter, r *http.Request) {
 		w.panel(rw, it, map[string]any{"Amount": amount, "Error": err.Error()})
 		return
 	}
-	w.panel(rw, it, map[string]any{
-		"Amount": amount,
-		"Done":   fmt.Sprintf("Заказ #%d: %s × %s %s отправлен", job.ID, it.Label, group(amount), it.Unit()),
-	})
+	// The order is placed: close the window (empty #craft) and report it
+	// in the bar instead.
+	msg := fmt.Sprintf("Заказ #%d: %s × %s %s отправлен", job.ID, it.Label, group(amount), it.Unit())
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(rw, `<span id="flash" role="status" hx-swap-oob="true"><span class="flash">%s</span></span>`,
+		template.HTMLEscapeString(msg))
 }
 
 func (w *Web) resync(rw http.ResponseWriter, r *http.Request) {

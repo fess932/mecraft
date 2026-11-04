@@ -310,22 +310,43 @@ func matches(text string, fields ...string) bool {
 	return false
 }
 
+func (q ItemQuery) keep(it Item, text string) bool {
+	if q.CraftableOnly && !it.Craftable {
+		return false
+	}
+	if q.InStockOnly && it.Size <= 0 {
+		return false
+	}
+	return matches(text, it.Label, it.Name)
+}
+
 func (s *Store) Items(q ItemQuery) (list []Item, total int) {
 	text := strings.ToLower(strings.TrimSpace(q.Text))
 	s.mu.RLock()
 	for _, it := range s.items {
-		if q.CraftableOnly && !it.Craftable {
-			continue
+		if q.keep(*it, text) {
+			list = append(list, *it)
 		}
-		if q.InStockOnly && it.Size <= 0 {
-			continue
-		}
-		if !matches(text, it.Label, it.Name) {
-			continue
-		}
-		list = append(list, *it)
 	}
 	s.mu.RUnlock()
+	return q.page(list)
+}
+
+// FluidItems is Items for fluids, with the same filters, sort and paging.
+func (s *Store) FluidItems(q ItemQuery) (list []Item, total int) {
+	text := strings.ToLower(strings.TrimSpace(q.Text))
+	s.mu.RLock()
+	for _, f := range s.fluids {
+		if it := f.Item(); q.keep(it, text) {
+			list = append(list, it)
+		}
+	}
+	s.mu.RUnlock()
+	return q.page(list)
+}
+
+// page sorts the filtered list and cuts it to the limit.
+func (q ItemQuery) page(list []Item) ([]Item, int) {
 	sort.Slice(list, func(i, j int) bool {
 		a, b := list[i], list[j]
 		if !q.SortByName && a.Size != b.Size {
@@ -336,7 +357,7 @@ func (s *Store) Items(q ItemQuery) (list []Item, total int) {
 		}
 		return a.Key() < b.Key()
 	})
-	total = len(list)
+	total := len(list)
 	if q.Limit > 0 && len(list) > q.Limit {
 		list = list[:q.Limit]
 	}
@@ -359,25 +380,6 @@ func (s *Store) FindItem(key string) (Item, bool) {
 		return Item{}, false
 	}
 	return *it, true
-}
-
-func (s *Store) Fluids(text string) []Fluid {
-	text = strings.ToLower(strings.TrimSpace(text))
-	s.mu.RLock()
-	var list []Fluid
-	for _, f := range s.fluids {
-		if matches(text, f.Label, f.Name) {
-			list = append(list, *f)
-		}
-	}
-	s.mu.RUnlock()
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].Amount != list[j].Amount {
-			return list[i].Amount > list[j].Amount
-		}
-		return list[i].Label < list[j].Label
-	})
-	return list
 }
 
 func (s *Store) CPUs() []CPU {
