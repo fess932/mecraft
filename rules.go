@@ -31,8 +31,36 @@ func (r Rule) Item() Item {
 type ruleState struct {
 	JobID   int64
 	NextTry time.Time
+	Fails   int   // failed orders in a row, drives the retry delay
+	Base    int64 // stock when the order was placed
 	Note    string
 	Ordered time.Time
+}
+
+// Retry delays after a failed order: 5s, doubling up to a minute.
+const (
+	retryMin = 5 * time.Second
+	retryMax = time.Minute
+	// arrivalWait is how long a finished order may wait for its items to
+	// show up in the stock before the next one is placed anyway.
+	arrivalWait = time.Second
+)
+
+// retryDelay is the wait after the given number of failures in a row.
+func retryDelay(fails int) time.Duration {
+	d := retryMin
+	for i := 1; i < fails && d < retryMax; i++ {
+		d *= 2
+	}
+	return min(d, retryMax)
+}
+
+// waitText shows a retry delay as "20 с" or "1 мин".
+func waitText(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d мин", d/time.Minute)
+	}
+	return fmt.Sprintf("%d с", d/time.Second)
 }
 
 // RuleView is a rule with its live state, for the UI.
@@ -125,6 +153,7 @@ func (rs *Rules) Put(r Rule) error {
 	// A changed rule gets a fresh chance right away.
 	if st := rs.state[r.Key]; st != nil {
 		st.NextTry = time.Time{}
+		st.Fails = 0
 	}
 	return nil
 }
@@ -160,6 +189,7 @@ func (rs *Rules) SetEnabled(key string, on bool) error {
 	}
 	if st := rs.state[key]; st != nil {
 		st.NextTry = time.Time{}
+		st.Fails = 0
 	}
 	return nil
 }
@@ -190,27 +220,36 @@ func (rs *Rules) Views(store *Store) []RuleView {
 	return out
 }
 
+// crafter places crafting orders; *Hub in the app, a fake in tests.
+type crafter interface {
+	Craft(it Item, amount int64, auto bool) (*Job, error)
+}
+
 // Maintainer orders crafts so that every enabled rule stays at its level.
+// A finished order is followed by the next one at once while the level is
+// not reached; a failed one is retried after retryDelay.
 type Maintainer struct {
 	store    *Store
-	hub      *Hub
+	hub      crafter
 	rules    *Rules
 	interval time.Duration
-	settle   time.Duration // wait after a finished order for stock to arrive
-	backoff  time.Duration // wait after a failed order
 }
 
-func NewMaintainer(store *Store, hub *Hub, rules *Rules, interval time.Duration) *Maintainer {
-	return &Maintainer{
-		store: store, hub: hub, rules: rules, interval: interval,
-		settle: interval, backoff: 12 * interval,
-	}
+func NewMaintainer(store *Store, hub crafter, rules *Rules, interval time.Duration) *Maintainer {
+	return &Maintainer{store: store, hub: hub, rules: rules, interval: interval}
 }
 
+// Run checks the levels every interval and right after any job changes
+// state. OC sends stock changes before the job state, so the stock is
+// already up to date when a finished order is seen.
 func (m *Maintainer) Run() {
 	t := time.NewTicker(m.interval)
 	defer t.Stop()
-	for range t.C {
+	for {
+		select {
+		case <-t.C:
+		case <-m.store.JobEvents():
+		}
 		m.Tick(time.Now())
 	}
 }
@@ -218,6 +257,7 @@ func (m *Maintainer) Run() {
 type order struct {
 	key    string
 	item   Item
+	have   int64
 	amount int64
 }
 
@@ -250,8 +290,14 @@ func (m *Maintainer) Tick(now time.Time) {
 				s.Note = fmt.Sprintf("заказ #%d: %s", job.ID, stateText(job.State))
 				continue
 			case ok && job.State == "done":
-				s.NextTry = now.Add(m.settle)
+				s.NextTry = time.Time{}
+				s.Fails = 0
 				s.Note = fmt.Sprintf("заказ #%d готов", job.ID)
+				// OC sends stock changes first, but a busy computer can
+				// lag; do not order again before the crafted items count.
+				if it, _ := m.store.FindItem(key); it.Size <= s.Base {
+					s.NextTry = now.Add(arrivalWait)
+				}
 			default:
 				reason := "заказ пропал"
 				if ok {
@@ -260,8 +306,10 @@ func (m *Maintainer) Tick(now time.Time) {
 						reason += ": " + job.Reason
 					}
 				}
-				s.NextTry = now.Add(m.backoff)
-				s.Note = fmt.Sprintf("заказ #%d — %s; повтор через %s", s.JobID, reason, m.backoff.Round(time.Second))
+				s.Fails++
+				d := retryDelay(s.Fails)
+				s.NextTry = now.Add(d)
+				s.Note = fmt.Sprintf("заказ #%d — %s; повтор через %s", s.JobID, reason, waitText(d))
 			}
 			s.JobID = 0
 		}
@@ -283,7 +331,7 @@ func (m *Maintainer) Tick(now time.Time) {
 		if amount <= 0 {
 			amount = r.Target - have
 		}
-		orders = append(orders, order{key: key, item: it, amount: amount})
+		orders = append(orders, order{key: key, item: it, have: have, amount: amount})
 	}
 	m.rules.mu.Unlock()
 
@@ -293,10 +341,13 @@ func (m *Maintainer) Tick(now time.Time) {
 		s := m.rules.state[o.key]
 		if s != nil {
 			if err != nil {
-				s.NextTry = now.Add(m.backoff)
-				s.Note = "не отправлен: " + err.Error()
+				s.Fails++
+				d := retryDelay(s.Fails)
+				s.NextTry = now.Add(d)
+				s.Note = fmt.Sprintf("не отправлен: %s; повтор через %s", err, waitText(d))
 			} else {
 				s.JobID = job.ID
+				s.Base = o.have
 				s.Ordered = now
 				s.Note = fmt.Sprintf("заказ #%d: отправлен", job.ID)
 			}

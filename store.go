@@ -100,12 +100,25 @@ type Store struct {
 	lastSync  time.Time
 	lastSeen  time.Time
 	failure   string // why the OC script stopped, until the next full sync
+	jobEvents chan struct{}
 }
 
 func NewStore() *Store {
 	return &Store{
-		items:  map[string]*Item{},
-		fluids: map[string]*Fluid{},
+		items:     map[string]*Item{},
+		fluids:    map[string]*Fluid{},
+		jobEvents: make(chan struct{}, 1),
+	}
+}
+
+// JobEvents fires after a job changes state, so stock levels can react to a
+// finished order at once instead of on the next check.
+func (s *Store) JobEvents() <-chan struct{} { return s.jobEvents }
+
+func (s *Store) jobChanged() {
+	select {
+	case s.jobEvents <- struct{}{}:
+	default:
 	}
 }
 
@@ -271,6 +284,7 @@ func (s *Store) UpdateJob(id int64, state, reason string) {
 			j.State = state
 			j.Reason = reason
 			j.Updated = time.Now()
+			s.jobChanged()
 			return
 		}
 	}
