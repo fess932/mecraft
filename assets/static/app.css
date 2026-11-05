@@ -279,6 +279,9 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .lvl > span { display: block; height: 100%; background: var(--fluix); }
 .lvl.low > span { background: #f0b232; }
 .lvl.off > span { background: #6a6a6a; }
+.lvl.drain > span { background: #4a8f4a; }
+.lvl.drain.busy > span { background: #3fa7d6; }
+.lvl.drain.off > span { background: #6a6a6a; }
 .slot.mini { width: 36px; height: 36px; cursor: default; flex: none; }
 .slot.mini::after { display: none; }
 
@@ -359,6 +362,25 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .grow { flex: 1; }
 .hint { margin: 10px 0 0; font-size: 14px; color: var(--ink-soft); }
+
+/* Stock rule: the mode decides which fields show. */
+.modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.toggle input[type=radio] + span::before { border-radius: 50%; }
+.rule:has(input[name=mode][value=drain]:checked) .only-level,
+.rule:not(:has(input[name=mode][value=drain]:checked)) .only-drain { display: none; }
+.picker { display: grid; gap: 6px; margin-bottom: 10px; }
+.picked { margin: 0; font-size: 14px; color: var(--ink); }
+.picked:empty { display: none; }
+.search-label { display: grid; gap: 4px; font-size: 14px; color: var(--ink); }
+.picks { display: grid; gap: 2px; max-height: 240px; overflow-y: auto; }
+.picks:empty { display: none; }
+.pick {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 2px 6px; border: 0; background: transparent; color: var(--ink);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.pick:hover, .pick:focus-visible { background: #b4b4b4; outline: none; }
+.pick .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .msg { margin: 12px 0 0; padding: 6px 10px; box-shadow: var(--sunken); background: #b4b4b4; }
 .msg.ok { color: var(--ok); }
 .msg.err { color: var(--err); }

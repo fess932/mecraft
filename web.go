@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +71,7 @@ func (w *Web) Routes(static, icons, oc fs.FS) http.Handler {
 	mux.HandleFunc("POST /resync", w.resync)
 	mux.HandleFunc("POST /rules", w.saveRule)
 	mux.HandleFunc("POST /rules/delete", w.deleteRule)
+	mux.HandleFunc("GET /pick", w.pick)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cached(http.FileServerFS(static))))
 	mux.Handle("GET /icons/", http.StripPrefix("/icons/", cached(http.FileServerFS(icons))))
 	mux.Handle("GET /oc/", http.StripPrefix("/oc/", http.FileServerFS(oc)))
@@ -179,7 +181,7 @@ func levelItems(levels map[string]*RuleView, fluids bool) []Item {
 			continue
 		}
 		it := v.Item()
-		it.Size, it.Craftable = v.Have, v.InNet && v.Craftable
+		it.Size, it.Craftable = v.Stock, v.Craftable
 		out = append(out, it)
 	}
 	return out
@@ -246,11 +248,63 @@ func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
 		Key: it.Key(), Name: it.Name, Damage: it.Damage, Label: it.Label,
 		Target: target, Batch: batch, Enabled: r.PostForm.Get("enabled") != "", Fluid: it.Fluid,
 	}
+	if r.PostForm.Get("mode") == ModeDrain {
+		rule.Mode = ModeDrain
+		rule.Source = r.PostForm.Get("source")
+		rule.SourceLabel = w.sourceLabel(rule.Key, rule.Source)
+	}
 	if err := w.rules.Put(rule); err != nil {
 		w.panel(rw, it, map[string]any{"Error": err.Error()})
 		return
 	}
+	if rule.Drain() {
+		w.closePanel(rw, fmt.Sprintf("Переработка сохранена: %s, пока %s больше %s %s",
+			it.Label, rule.SourceLabel, group(target), rule.SourceUnit()))
+		return
+	}
 	w.closePanel(rw, fmt.Sprintf("Уровень сохранён: %s, не меньше %s %s", it.Label, group(target), it.Unit()))
+}
+
+// sourceLabel names the resource of a drain rule: from the network, or
+// from the saved rule while the resource is absent.
+func (w *Web) sourceLabel(key, source string) string {
+	if it, ok := w.store.FindItem(source); ok {
+		return it.Label
+	}
+	if r, ok := w.rules.Get(key); ok && r.Source == source {
+		return r.SourceLabel
+	}
+	return source
+}
+
+const pickLimit = 8
+
+// pick lists items and fluids matching the search, to choose the resource
+// of a drain rule.
+func (w *Web) pick(rw http.ResponseWriter, r *http.Request) {
+	text := strings.TrimSpace(r.URL.Query().Get("source_q"))
+	if text == "" {
+		w.render(rw, "pick", map[string]any{})
+		return
+	}
+	q := ItemQuery{Text: text}
+	items, _ := w.store.Items(q)
+	fluids, _ := w.store.FluidItems(q)
+	list := append(items, fluids...)
+	// Names that start with the search go first ("вод" finds water before
+	// wires), then the biggest stock.
+	low := strings.ToLower(text)
+	starts := func(it Item) bool { return strings.HasPrefix(strings.ToLower(it.Label), low) }
+	sort.SliceStable(list, func(i, j int) bool {
+		if a, b := starts(list[i]), starts(list[j]); a != b {
+			return a
+		}
+		return list[i].Size > list[j].Size
+	})
+	if len(list) > pickLimit {
+		list = list[:pickLimit]
+	}
+	w.render(rw, "pick", map[string]any{"Items": list, "Searched": true})
 }
 
 func (w *Web) deleteRule(rw http.ResponseWriter, r *http.Request) {

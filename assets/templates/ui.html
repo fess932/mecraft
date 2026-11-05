@@ -99,6 +99,14 @@
     var v = (parseInt(input.value, 10) || 0) + n;
     input.value = String(Math.max(1, v));
   }
+  // pickSource puts the chosen resource into the drain form.
+  function pickSource(btn) {
+    var box = btn.closest('.picker');
+    box.querySelector('input[name=source]').value = btn.dataset.key;
+    box.querySelector('.picked').textContent = 'Ресурс: ' + btn.dataset.label;
+    box.querySelector('input[name=source_q]').value = '';
+    box.querySelector('.picks').innerHTML = '';
+  }
   function closeCraft() { document.getElementById('craft').innerHTML = ''; }
   document.getElementById('craft').addEventListener('click', function (e) {
     if (e.target === this) closeCraft();
@@ -189,20 +197,27 @@
 {{if gt .Power.Max 0.0}}<span class="stat power" title="Энергия ME: {{pct .Power.Stored .Power.Max}}%"><span class="meter"><span style="width: {{pct .Power.Stored .Power.Max}}%"></span></span>{{pct .Power.Stored .Power.Max}}%</span>{{end}}
 {{end}}
 
+{{define "pick"}}
+{{range .Items}}<button type="button" class="pick" data-key="{{.Key}}" data-label="{{.Label}}" onclick="pickSource(this)">
+  <span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
+  <span class="name">{{.Label}}</span><span class="stat">{{short .Size}} {{.Unit}}</span>
+</button>{{else}}{{if .Searched}}<p class="hint">В сети такого нет.</p>{{end}}{{end}}
+{{end}}
+
 {{define "slots"}}
 {{if not .Items}}
-<p class="empty">{{if .Ruled}}С уровнем под эти фильтры ничего нет. Уровень задаётся в окне {{if .Fluids}}жидкости{{else}}предмета{{end}}: «Держать уровень» — сервер сам будет заказывать крафт, когда запас упадёт.{{else if .Fluids}}Жидкостей в сети нет.{{else}}Здесь пусто. Если лампа OC не горит, запусти <code>mecraft</code> в игре; если горит, проверь фильтры и поиск.{{end}}</p>
+<p class="empty">{{if .Ruled}}С уровнем под эти фильтры ничего нет. Уровень задаётся в окне {{if .Fluids}}жидкости{{else}}предмета{{end}}: «Держать уровень» — сервер сам будет заказывать крафт, когда запас упадёт; «Перерабатывать ресурс» — заказывать, пока выбранного ресурса больше порога.{{else if .Fluids}}Жидкостей в сети нет.{{else}}Здесь пусто. Если лампа OC не горит, запусти <code>mecraft</code> в игре; если горит, проверь фильтры и поиск.{{end}}</p>
 {{else}}
 <div class="slots">
 {{range .Items}}
   {{$lv := index $.Levels .Key}}
   <button type="button" class="slot{{if eq .Size 0}} zero{{end}}" hx-get="{{itemq .}}" hx-target="#craft"
           data-title="{{.Label}}" data-mod="{{mod .Name}}"
-          data-lines="{{group .Size}} {{.Unit}}{{if .Craftable}}&#10;Можно скрафтить{{end}}{{with $lv}}&#10;Уровень: {{group .Have}} / {{group .Target}}{{if not .Enabled}}, выключен{{end}}&#10;{{.Note}}{{end}}&#10;{{.Name}}{{if not .Fluid}}:{{.Damage}}{{end}}"
+          data-lines="{{group .Size}} {{.Unit}}{{if .Craftable}}&#10;Можно скрафтить{{end}}{{with $lv}}{{if .Drain}}&#10;Перерабатывает {{.SourceLabel}}: {{group .Have}}, порог {{group .Target}}{{else}}&#10;Уровень: {{group .Have}} / {{group .Target}}{{end}}{{if not .Enabled}}, выключено{{end}}&#10;{{.Note}}{{end}}&#10;{{.Name}}{{if not .Fluid}}:{{.Damage}}{{end}}"
           aria-label="{{.Label}}, {{group .Size}} {{.Unit}}">
     <img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt="">
     {{if and (eq .Size 0) .Craftable}}<span class="cnt craft">Craft</span>{{else}}<span class="cnt">{{short .Size}}</span>{{end}}
-    {{with $lv}}<span class="lvl{{if not .Enabled}} off{{else if lt .Have .Target}} low{{end}}" aria-hidden="true"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>{{end}}
+    {{with $lv}}{{if .Drain}}<span class="lvl drain{{if not .Enabled}} off{{else if gt .Have .Target}} busy{{end}}" aria-hidden="true"><span style="width: 100%"></span></span>{{else}}<span class="lvl{{if not .Enabled}} off{{else if lt .Have .Target}} low{{end}}" aria-hidden="true"><span style="width: {{pct (float .Have) (float .Target) | cap100}}%"></span></span>{{end}}{{end}}
   </button>
 {{end}}
 </div>
@@ -283,13 +298,26 @@
   </form>
   {{end}}
 
-  <form class="section" hx-post="/rules" hx-target="#craft">
-    <h3>Держать уровень</h3>
-    {{with .Level}}<p class="sub level{{if and .Enabled (lt .Have .Target)}} low{{end}}">Сейчас {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} из {{group .Target}}{{if .Note}}: {{.Note}}{{end}}</p>{{end}}
+  {{$drain := false}}{{with .Rule}}{{$drain = .Drain}}{{end}}
+  <form class="section rule" hx-post="/rules" hx-target="#craft">
+    <div class="modes" role="radiogroup" aria-label="Что делать автоматически">
+      <label class="toggle"><input type="radio" name="mode" value="" {{if not $drain}}checked{{end}}><span>Держать уровень</span></label>
+      <label class="toggle"><input type="radio" name="mode" value="drain" {{if $drain}}checked{{end}}><span>Перерабатывать ресурс</span></label>
+    </div>
+    {{with .Level}}<p class="sub level{{if and .Enabled (not .Drain) (lt .Have .Target)}} low{{end}}">{{if .Drain}}{{.SourceLabel}}: сейчас{{else}}Сейчас{{end}} {{if .InNet}}{{group .Have}}{{else}}нет в сети{{end}} {{if .Drain}}при пороге{{else}}из{{end}} {{group .Target}}{{if .Note}}: {{.Note}}{{end}}</p>{{end}}
     <input type="hidden" name="key" value="{{.Item.Key}}">
+    <div class="only-drain picker">
+      <input type="hidden" name="source" value="{{with .Rule}}{{.Source}}{{end}}">
+      <p class="picked">{{with .Rule}}{{if .Source}}Ресурс: <strong>{{.SourceLabel}}</strong>{{end}}{{end}}</p>
+      <label class="search-label">{{if .Rule}}{{if .Rule.Source}}Другой ресурс{{else}}Ресурс{{end}}{{else}}Ресурс{{end}}
+        <input class="field" type="search" name="source_q" placeholder="найти в сети: предмет или жидкость" autocomplete="off"
+               hx-get="/pick" hx-trigger="input changed delay:250ms, search" hx-target="next .picks" hx-include="this">
+      </label>
+      <div class="picks"></div>
+    </div>
     <div class="pair">
-      <label>Не меньше
-        <input class="field num" type="number" name="target" min="1" step="1" placeholder="например, 256" value="{{with .Rule}}{{.Target}}{{end}}">
+      <label><span class="only-level">Не меньше</span><span class="only-drain">Пока ресурса больше</span>
+        <input class="field num" type="number" name="target" min="0" step="1" placeholder="например, 256" value="{{with .Rule}}{{.Target}}{{end}}">
       </label>
       <label>Заказывать по
         <input class="field num" type="number" name="batch" min="0" step="1" placeholder="сколько не хватает" value="{{with .Rule}}{{if .Batch}}{{.Batch}}{{end}}{{end}}">
@@ -298,10 +326,11 @@
     <div class="line">
       <label class="toggle"><input type="checkbox" name="enabled" value="1" {{if .Rule}}{{if .Rule.Enabled}}checked{{end}}{{else}}checked{{end}}><span>Включено</span></label>
       <span class="grow"></span>
-      {{if .Rule}}<button type="button" class="btn" hx-post="/rules/delete" hx-include="closest form" hx-target="#craft">Удалить уровень</button>{{end}}
-      <button type="submit" class="btn go">{{if .Rule}}Сохранить уровень{{else}}Держать уровень{{end}}</button>
+      {{if .Rule}}<button type="button" class="btn" hx-post="/rules/delete" hx-include="closest form" hx-target="#craft">Удалить</button>{{end}}
+      <button type="submit" class="btn go">Сохранить</button>
     </div>
-    {{if not .Item.Craftable}}<p class="hint">В ME нет шаблона крафта для этого предмета: уровень сохранится, но заказывать будет нечего.</p>{{end}}
+    <p class="hint only-drain">Партии заказываются одна за другой, пока ресурса в сети больше порога. Последняя партия может уйти немного ниже.</p>
+    {{if not .Item.Craftable}}<p class="hint">В ME нет шаблона крафта для этого предмета: правило сохранится, но заказывать будет нечего.</p>{{end}}
   </form>
 {{else}}
   <header class="whead"><h2>Предмет не найден</h2><button type="button" class="btn x" onclick="closeCraft()" aria-label="Закрыть">×</button></header>
