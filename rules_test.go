@@ -142,3 +142,79 @@ func TestJobEventsWakeTheMaintainer(t *testing.T) {
 		t.Fatal("no job event")
 	}
 }
+
+func TestMaintainerDrainsResource(t *testing.T) {
+	store := NewStore()
+	store.SetConnected(true, "test")
+	sodium := Item{Name: "gt:dust", Damage: 17, Label: "Натрий", Craftable: true}
+	naoh := Item{Name: "gt:dust", Damage: 685, Label: "Гидроксид натрия", Size: 10_100}
+	store.BeginItems()
+	store.AddItems([]Item{sodium, naoh})
+	store.EndItems()
+
+	rules := NewRules(filepath.Join(t.TempDir(), "mecraft.json"), defaultConfig())
+	rule := Rule{Key: sodium.Key(), Name: sodium.Name, Damage: sodium.Damage, Label: sodium.Label,
+		Mode: ModeDrain, Source: naoh.Key(), SourceLabel: naoh.Label, Target: 10_000, Batch: 64, Enabled: true}
+	if err := rules.Put(rule); err != nil {
+		t.Fatal(err)
+	}
+	fc := &fakeCrafter{store: store}
+	m := NewMaintainer(store, fc, rules, 5*time.Second)
+	now := time.Now()
+
+	m.Tick(now)
+	if len(fc.orders) != 1 {
+		t.Fatalf("%d orders, want 1 while the resource is above the threshold", len(fc.orders))
+	}
+	if j, _ := store.Job(fc.orders[0]); j.Amount != 64 || j.Name != sodium.Name {
+		t.Fatalf("ordered %+v, want 64 of the product", j)
+	}
+
+	// the craft used the resource and made the product; still above 10k
+	store.ApplyItemDelta([]Item{{Name: naoh.Name, Damage: naoh.Damage, Label: naoh.Label, Size: -64}, {Name: sodium.Name, Damage: sodium.Damage, Label: sodium.Label, Size: 64}})
+	store.UpdateJob(fc.orders[0], "done", "")
+	m.Tick(now)
+	if len(fc.orders) != 2 {
+		t.Fatalf("%d orders, want the next batch at once", len(fc.orders))
+	}
+
+	// down to the threshold: stop
+	store.ApplyItemDelta([]Item{{Name: naoh.Name, Damage: naoh.Damage, Label: naoh.Label, Size: -36}, {Name: sodium.Name, Damage: sodium.Damage, Label: sodium.Label, Size: 64}})
+	store.UpdateJob(fc.orders[1], "done", "")
+	m.Tick(now)
+	if len(fc.orders) != 2 {
+		t.Fatalf("%d orders, want none at the threshold", len(fc.orders))
+	}
+	lv := rules.Levels(store)[sodium.Key()]
+	if lv.Have != 10_000 || lv.Stock != 128 || lv.Note != "ресурс переработан до порога" {
+		t.Fatalf("view %+v", lv)
+	}
+}
+
+func TestDrainRuleValidation(t *testing.T) {
+	rules := NewRules(filepath.Join(t.TempDir(), "mecraft.json"), defaultConfig())
+	base := Rule{Key: "a|0|A", Name: "a", Label: "A", Mode: ModeDrain, Source: "b|0|B", SourceLabel: "B", Target: 0, Batch: 1}
+	if err := rules.Put(base); err != nil {
+		t.Fatalf("threshold 0 should be fine: %v", err)
+	}
+	for name, r := range map[string]Rule{
+		"no source": func() Rule { r := base; r.Source = ""; return r }(),
+		"self":      func() Rule { r := base; r.Source = r.Key; return r }(),
+		"no batch":  func() Rule { r := base; r.Batch = 0; return r }(),
+		"negative":  func() Rule { r := base; r.Target = -1; return r }(),
+		"bad mode":  func() Rule { r := base; r.Mode = "x"; return r }(),
+	} {
+		if err := rules.Put(r); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	// switching back to the level mode drops the resource
+	lvl := base
+	lvl.Mode, lvl.Target = "", 5
+	if err := rules.Put(lvl); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := rules.Get(base.Key); r.Source != "" || r.SourceLabel != "" {
+		t.Fatalf("level rule kept the resource: %+v", r)
+	}
+}

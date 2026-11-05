@@ -5,22 +5,59 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
-// Rule keeps an item stocked: when the network holds less than Target,
-// a crafting order for Batch items is placed (or for the shortfall when
-// Batch is 0).
+// Rule orders crafts of an item automatically.
+//
+// In the level mode (Mode "") it keeps the item stocked: when the network
+// holds less than Target, Batch items are ordered (or the shortfall when
+// Batch is 0). In the drain mode it processes a resource the recipe uses:
+// Batch items are ordered while the network holds more than Target of
+// Source.
 type Rule struct {
-	Key     string `json:"key"`
-	Name    string `json:"name"`
-	Damage  int    `json:"damage"`
-	Label   string `json:"label"`
-	Target  int64  `json:"target"`
-	Batch   int64  `json:"batch"`
-	Enabled bool   `json:"enabled"`
-	Fluid   bool   `json:"fluid,omitempty"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Damage      int    `json:"damage"`
+	Label       string `json:"label"`
+	Target      int64  `json:"target"`
+	Batch       int64  `json:"batch"`
+	Enabled     bool   `json:"enabled"`
+	Fluid       bool   `json:"fluid,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Source      string `json:"source,omitempty"` // key of the resource in the drain mode
+	SourceLabel string `json:"sourceLabel,omitempty"`
+}
+
+// ModeDrain processes Source down to Target.
+const ModeDrain = "drain"
+
+func (r Rule) Drain() bool { return r.Mode == ModeDrain }
+
+// Watched is the key whose stock the rule compares with Target.
+func (r Rule) Watched() string {
+	if r.Drain() {
+		return r.Source
+	}
+	return r.Key
+}
+
+// Due tells whether the watched stock calls for another order.
+func (r Rule) Due(have int64) bool {
+	if r.Drain() {
+		return have > r.Target
+	}
+	return have < r.Target
+}
+
+// SourceUnit is "л" for a fluid resource and "шт." otherwise.
+func (r Rule) SourceUnit() string {
+	if strings.HasPrefix(r.Source, fluidKeyPrefix) {
+		return "л"
+	}
+	return "шт."
 }
 
 func (r Rule) Item() Item {
@@ -66,8 +103,9 @@ func waitText(d time.Duration) string {
 // RuleView is a rule with its live state, for the UI.
 type RuleView struct {
 	Rule
-	Have      int64
-	InNet     bool
+	Have      int64 // stock of the watched item: the item itself or the resource
+	InNet     bool  // the watched item is in the network
+	Stock     int64 // stock of the item itself
 	Craftable bool
 	Note      string
 	JobID     int64
@@ -132,11 +170,30 @@ func (rs *Rules) Levels(store *Store) map[string]*RuleView {
 }
 
 func (rs *Rules) Put(r Rule) error {
-	if r.Target <= 0 {
-		return errors.New("уровень должен быть больше нуля")
-	}
-	if r.Batch < 0 {
-		return errors.New("партия не может быть отрицательной")
+	switch r.Mode {
+	case "":
+		if r.Target <= 0 {
+			return errors.New("уровень должен быть больше нуля")
+		}
+		if r.Batch < 0 {
+			return errors.New("партия не может быть отрицательной")
+		}
+		r.Source, r.SourceLabel = "", ""
+	case ModeDrain:
+		if r.Source == "" {
+			return errors.New("выбери ресурс, который перерабатывать")
+		}
+		if r.Source == r.Key {
+			return errors.New("ресурс должен отличаться от того, что крафтится")
+		}
+		if r.Target < 0 {
+			return errors.New("порог не может быть отрицательным")
+		}
+		if r.Batch <= 0 {
+			return errors.New("укажи, сколько заказывать за раз")
+		}
+	default:
+		return fmt.Errorf("неизвестный режим %q", r.Mode)
 	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -208,7 +265,10 @@ func (rs *Rules) Views(store *Store) []RuleView {
 	rs.mu.Unlock()
 	for i := range out {
 		if it, ok := store.FindItem(out[i].Key); ok {
-			out[i].Have, out[i].InNet, out[i].Craftable = it.Size, true, it.Craftable
+			out[i].Stock, out[i].Craftable = it.Size, it.Craftable
+		}
+		if it, ok := store.FindItem(out[i].Watched()); ok {
+			out[i].Have, out[i].InNet = it.Size, true
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -257,7 +317,7 @@ func (m *Maintainer) Run() {
 type order struct {
 	key    string
 	item   Item
-	have   int64
+	base   int64 // stock of the item when ordering
 	amount int64
 }
 
@@ -317,12 +377,17 @@ func (m *Maintainer) Tick(now time.Time) {
 			continue
 		}
 
-		it, inNet := m.store.FindItem(key)
-		have := it.Size
-		if have >= r.Target {
-			s.Note = "в норме"
+		watched, _ := m.store.FindItem(r.Watched())
+		have := watched.Size
+		if !r.Due(have) {
+			if r.Drain() {
+				s.Note = "ресурс переработан до порога"
+			} else {
+				s.Note = "в норме"
+			}
 			continue
 		}
+		it, inNet := m.store.FindItem(key)
 		if !inNet || !it.Craftable {
 			s.Note = "нет шаблона крафта в ME"
 			continue
@@ -331,7 +396,7 @@ func (m *Maintainer) Tick(now time.Time) {
 		if amount <= 0 {
 			amount = r.Target - have
 		}
-		orders = append(orders, order{key: key, item: it, have: have, amount: amount})
+		orders = append(orders, order{key: key, item: it, base: it.Size, amount: amount})
 	}
 	m.rules.mu.Unlock()
 
@@ -347,7 +412,7 @@ func (m *Maintainer) Tick(now time.Time) {
 				s.Note = fmt.Sprintf("не отправлен: %s; повтор через %s", err, waitText(d))
 			} else {
 				s.JobID = job.ID
-				s.Base = o.have
+				s.Base = o.base
 				s.Ordered = now
 				s.Note = fmt.Sprintf("заказ #%d: отправлен", job.ID)
 			}
