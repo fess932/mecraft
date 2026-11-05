@@ -203,6 +203,7 @@ func TestDrainRuleValidation(t *testing.T) {
 		"no batch":  func() Rule { r := base; r.Batch = 0; return r }(),
 		"negative":  func() Rule { r := base; r.Target = -1; return r }(),
 		"bad mode":  func() Rule { r := base; r.Mode = "x"; return r }(),
+		"bad cap":   func() Rule { r := base; r.Cap = -1; return r }(),
 	} {
 		if err := rules.Put(r); err == nil {
 			t.Errorf("%s: want error", name)
@@ -216,5 +217,48 @@ func TestDrainRuleValidation(t *testing.T) {
 	}
 	if r, _ := rules.Get(base.Key); r.Source != "" || r.SourceLabel != "" {
 		t.Fatalf("level rule kept the resource: %+v", r)
+	}
+}
+
+func TestMaintainerDrainStopsAtItemCap(t *testing.T) {
+	store := NewStore()
+	store.SetConnected(true, "test")
+	sodium := Item{Name: "gt:dust", Damage: 17, Label: "Натрий", Size: 100, Craftable: true}
+	naoh := Item{Name: "gt:dust", Damage: 685, Label: "Гидроксид натрия", Size: 50_000}
+	store.BeginItems()
+	store.AddItems([]Item{sodium, naoh})
+	store.EndItems()
+	rules := NewRules(filepath.Join(t.TempDir(), "mecraft.json"), defaultConfig())
+	rule := Rule{Key: sodium.Key(), Name: sodium.Name, Damage: sodium.Damage, Label: sodium.Label,
+		Mode: ModeDrain, Source: naoh.Key(), SourceLabel: naoh.Label, Target: 10_000, Batch: 64, Cap: 164, Enabled: true}
+	if err := rules.Put(rule); err != nil {
+		t.Fatal(err)
+	}
+	fc := &fakeCrafter{store: store}
+	m := NewMaintainer(store, fc, rules, 5*time.Second)
+	now := time.Now()
+	m.Tick(now)
+	if len(fc.orders) != 1 {
+		t.Fatalf("%d orders, want 1 below the cap", len(fc.orders))
+	}
+	store.ApplyItemDelta([]Item{{Name: sodium.Name, Damage: sodium.Damage, Label: sodium.Label, Size: 64}})
+	store.UpdateJob(fc.orders[0], "done", "")
+	m.Tick(now)
+	if len(fc.orders) != 1 {
+		t.Fatalf("%d orders, want none at the cap though the resource is plenty", len(fc.orders))
+	}
+	lv := rules.Levels(store)[sodium.Key()]
+	if lv.Note != "предмета уже не меньше лимита" || lv.Busy() {
+		t.Fatalf("view %+v busy %v", lv, lv.Busy())
+	}
+
+	// cap 0 ignores the item stock
+	rule.Cap = 0
+	if err := rules.Put(rule); err != nil {
+		t.Fatal(err)
+	}
+	m.Tick(now)
+	if len(fc.orders) != 2 {
+		t.Fatalf("%d orders, want one more without a cap", len(fc.orders))
 	}
 }

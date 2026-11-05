@@ -240,8 +240,9 @@ func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
 	}
 	target, err1 := parseCount(r.PostForm.Get("target"))
 	batch, err2 := parseCount(r.PostForm.Get("batch"))
-	if err1 != nil || err2 != nil {
-		w.panel(rw, it, map[string]any{"Error": "уровень и партия — целые числа"})
+	limit, err3 := parseCount(r.PostForm.Get("cap"))
+	if err1 != nil || err2 != nil || err3 != nil {
+		w.panel(rw, it, map[string]any{"Error": "уровень, лимит и партия — целые числа"})
 		return
 	}
 	rule := Rule{
@@ -252,14 +253,19 @@ func (w *Web) saveRule(rw http.ResponseWriter, r *http.Request) {
 		rule.Mode = ModeDrain
 		rule.Source = r.PostForm.Get("source")
 		rule.SourceLabel = w.sourceLabel(rule.Key, rule.Source)
+		rule.Cap = limit
 	}
 	if err := w.rules.Put(rule); err != nil {
 		w.panel(rw, it, map[string]any{"Error": err.Error()})
 		return
 	}
 	if rule.Drain() {
-		w.closePanel(rw, fmt.Sprintf("Переработка сохранена: %s, пока %s больше %s %s",
-			it.Label, rule.SourceLabel, group(target), rule.SourceUnit()))
+		msg := fmt.Sprintf("Переработка сохранена: %s, пока %s больше %s %s",
+			it.Label, rule.SourceLabel, group(target), rule.SourceUnit())
+		if rule.Cap > 0 {
+			msg += fmt.Sprintf(" и %s меньше %s %s", it.Label, group(rule.Cap), it.Unit())
+		}
+		w.closePanel(rw, msg)
 		return
 	}
 	w.closePanel(rw, fmt.Sprintf("Уровень сохранён: %s, не меньше %s %s", it.Label, group(target), it.Unit()))

@@ -16,7 +16,7 @@ import (
 // holds less than Target, Batch items are ordered (or the shortfall when
 // Batch is 0). In the drain mode it processes a resource the recipe uses:
 // Batch items are ordered while the network holds more than Target of
-// Source.
+// Source and, when Cap is set, less than Cap of the item itself.
 type Rule struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
@@ -29,6 +29,7 @@ type Rule struct {
 	Mode        string `json:"mode,omitempty"`
 	Source      string `json:"source,omitempty"` // key of the resource in the drain mode
 	SourceLabel string `json:"sourceLabel,omitempty"`
+	Cap         int64  `json:"cap,omitempty"` // drain mode: stop at this much of the item; 0 means no limit
 }
 
 // ModeDrain processes Source down to Target.
@@ -44,12 +45,18 @@ func (r Rule) Watched() string {
 	return r.Key
 }
 
-// Due tells whether the watched stock calls for another order.
-func (r Rule) Due(have int64) bool {
+// Due tells whether another order is needed, given the stock of the
+// watched item (have) and of the item itself (stock).
+func (r Rule) Due(have, stock int64) bool {
 	if r.Drain() {
-		return have > r.Target
+		return have > r.Target && !r.Capped(stock)
 	}
 	return have < r.Target
+}
+
+// Capped tells whether a drain rule reached its limit of the item.
+func (r Rule) Capped(stock int64) bool {
+	return r.Drain() && r.Cap > 0 && stock >= r.Cap
 }
 
 // SourceUnit is "л" for a fluid resource and "шт." otherwise.
@@ -111,6 +118,9 @@ type RuleView struct {
 	JobID     int64
 	Ordered   time.Time
 }
+
+// Busy tells whether the rule wants another order right now.
+func (v RuleView) Busy() bool { return v.Enabled && v.Due(v.Have, v.Stock) }
 
 // Rules holds the stock levels and writes them back into the config file
 // together with the other settings.
@@ -178,7 +188,7 @@ func (rs *Rules) Put(r Rule) error {
 		if r.Batch < 0 {
 			return errors.New("партия не может быть отрицательной")
 		}
-		r.Source, r.SourceLabel = "", ""
+		r.Source, r.SourceLabel, r.Cap = "", "", 0
 	case ModeDrain:
 		if r.Source == "" {
 			return errors.New("выбери ресурс, который перерабатывать")
@@ -188,6 +198,9 @@ func (rs *Rules) Put(r Rule) error {
 		}
 		if r.Target < 0 {
 			return errors.New("порог не может быть отрицательным")
+		}
+		if r.Cap < 0 {
+			return errors.New("лимит предмета не может быть отрицательным")
 		}
 		if r.Batch <= 0 {
 			return errors.New("укажи, сколько заказывать за раз")
@@ -379,15 +392,18 @@ func (m *Maintainer) Tick(now time.Time) {
 
 		watched, _ := m.store.FindItem(r.Watched())
 		have := watched.Size
-		if !r.Due(have) {
-			if r.Drain() {
+		it, inNet := m.store.FindItem(key)
+		if !r.Due(have, it.Size) {
+			switch {
+			case r.Capped(it.Size):
+				s.Note = "предмета уже не меньше лимита"
+			case r.Drain():
 				s.Note = "ресурс переработан до порога"
-			} else {
+			default:
 				s.Note = "в норме"
 			}
 			continue
 		}
-		it, inNet := m.store.FindItem(key)
 		if !inNet || !it.Craftable {
 			s.Note = "нет шаблона крафта в ME"
 			continue

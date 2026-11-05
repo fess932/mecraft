@@ -316,6 +316,8 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .st-computing, .st-running, .st-sent { color: var(--warn); }
 .reason { color: var(--err); }
 .level { white-space: nowrap; }
+.level.wrap { white-space: normal; }
+.nw { white-space: nowrap; }
 .level.low { color: var(--warn); }
 .level.low .meter > span { background: #f0b232; }
 /* ---- craft window ------------------------------------------------------ */
@@ -359,6 +361,7 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .pair label { display: grid; gap: 4px; font-size: 14px; color: var(--ink); }
 .pair .field.num { width: 100%; }
+.pair + .pair { margin-top: 8px; }
 .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .grow { flex: 1; }
 .hint { margin: 10px 0 0; font-size: 14px; color: var(--ink-soft); }
