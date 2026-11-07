@@ -18,6 +18,7 @@
       <label><input type="radio" name="tab" value="fluids"><span>Жидкости</span></label>
       <label><input type="radio" name="tab" value="jobs"><span>Заказы</span></label>
       <label><input type="radio" name="tab" value="cpus"><span>Процессоры</span></label>
+      <label><input type="radio" name="tab" value="stats"><span>Статистика</span></label>
       <button type="button" class="btn sync" hx-post="/resync" hx-target="#flash" title="Запросить у OC полный список заново">Синхронизировать</button>
     </nav>
 
@@ -36,6 +37,20 @@
           <option value="name">По названию</option>
         </select>
         <label class="toggle only-search" title="Только то, для чего задан уровень"><input type="checkbox" name="ruled" value="1"><span>Уровни</span></label>
+        <select class="btn only-stats" name="period" aria-label="Период">
+          <option value="1h">За час</option>
+          <option value="6h">За 6 часов</option>
+          <option value="24h">За сутки</option>
+          <option value="7d">За неделю</option>
+          <option value="30d">За месяц</option>
+        </select>
+        <select class="btn only-stats" name="kind" aria-label="Что показывать">
+          <option value="">Предметы и жидкости</option>
+          <option value="items">Только предметы</option>
+          <option value="fluids">Только жидкости</option>
+        </select>
+        <input type="hidden" name="ssort" value="net">
+        <input type="hidden" name="sdir" value="desc">
         <span id="flash" role="status"></span>
         <input type="hidden" id="limit" name="limit" value="{{.Step}}">
       </div>
@@ -66,6 +81,9 @@
     if (typeof s.ruled === 'boolean') f.elements.ruled.checked = s.ruled;
     if (s.sort) f.elements.sort.value = s.sort;
     if (typeof s.q === 'string') f.elements.q.value = s.q;
+    ['period', 'kind', 'ssort', 'sdir'].forEach(function (n) {
+      if (typeof s[n] === 'string') f.elements[n].value = s[n];
+    });
     function save() {
       var t = f.querySelector('input[name=tab]:checked');
       try {
@@ -75,7 +93,11 @@
           craftable: f.elements.craftable.checked,
           ruled: f.elements.ruled.checked,
           sort: f.elements.sort.value,
-          q: f.elements.q.value
+          q: f.elements.q.value,
+          period: f.elements.period.value,
+          kind: f.elements.kind.value,
+          ssort: f.elements.ssort.value,
+          sdir: f.elements.sdir.value
         }));
       } catch (e) {}
     }
@@ -86,6 +108,18 @@
       if (e.target.id !== 'limit') document.getElementById('limit').value = '{{.Step}}';
     });
   })();
+
+  // sortStats sorts the statistics by a column; a second click flips it.
+  function sortStats(col) {
+    var f = document.getElementById('filters');
+    if (f.elements.ssort.value === col) {
+      f.elements.sdir.value = f.elements.sdir.value === 'desc' ? 'asc' : 'desc';
+    } else {
+      f.elements.ssort.value = col;
+      f.elements.sdir.value = col === 'name' ? 'asc' : 'desc';
+    }
+    htmx.trigger(f, 'change');
+  }
 
   function showMore(step) {
     var l = document.getElementById('limit');
@@ -344,4 +378,40 @@
   {{if .Error}}<p class="msg err" role="alert">{{.Error}}</p>{{end}}
   {{if .Done}}<p class="msg ok" role="status">{{.Done}}</p>{{end}}
 </div>
+{{end}}
+
+{{define "sorthead"}}<th{{if .Item}} class="item"{{end}}{{if eq .Sort .Col}} aria-sort="{{if .Desc}}descending{{else}}ascending{{end}}"{{end}}><button type="button" class="sort{{if eq .Sort .Col}} on{{end}}" onclick="sortStats('{{.Col}}')">{{.Title}}{{if eq .Sort .Col}} {{if .Desc}}▼{{else}}▲{{end}}{{end}}</button></th>{{end}}
+
+{{define "stats"}}
+{{if not .Rows}}
+<p class="empty">{{if .Searched}}Под эти фильтры за этот период ничего не менялось.{{else}}За этот период в сети ничего не менялось. Статистика копится, пока работают сервер и скрипт в OC; приход и расход по отдельности считает только свежий скрипт.{{end}}</p>
+{{else}}
+<div class="table-wrap">
+<table class="stats">
+  <thead><tr>
+    {{template "sorthead" (dict "Sort" .Sort "Desc" .Desc "Col" "name" "Title" "Предмет" "Item" true)}}
+    {{template "sorthead" (dict "Sort" .Sort "Desc" .Desc "Col" "in" "Title" "Пришло" "Item" false)}}
+    {{template "sorthead" (dict "Sort" .Sort "Desc" .Desc "Col" "out" "Title" "Ушло" "Item" false)}}
+    {{template "sorthead" (dict "Sort" .Sort "Desc" .Desc "Col" "net" "Title" "Итог" "Item" false)}}
+    {{if .Long}}<th><span class="sort">В час</span></th>{{end}}
+  </tr></thead>
+  <tbody>
+  {{range .Rows}}
+    <tr data-title="{{.Label}}" data-mod="{{mod .Name}}"
+        data-lines="Пришло: {{group .In}} {{.Unit}}&#10;Ушло: {{group .Out}} {{.Unit}}{{if .Fix}}&#10;Поправка при синхронизации: {{signed .Fix}} {{.Unit}}{{end}}&#10;{{.Name}}{{if not .Fluid}}:{{.Damage}}{{end}}">
+      <td class="item"><div><span class="slot mini"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span><span class="name">{{.Label}}</span></div></td>
+      <td class="in">{{if .In}}+{{group .In}}{{end}}</td>
+      <td class="out">{{if .Out}}−{{group .Out}}{{end}}</td>
+      <td class="net{{if gt .Net 0}} pos{{else if lt .Net 0}} neg{{end}}">{{signed .Net}} <span class="unit">{{.Unit}}</span></td>
+      {{if $.Long}}<td class="rate">{{signed .PerHour}}</td>{{end}}
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}
+<footer class="foot">
+  <span>Показано {{num .Shown}} из {{num .Total}}</span>
+  {{if .More}}<button type="button" class="btn" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}
+</footer>
 {{end}}

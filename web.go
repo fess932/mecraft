@@ -40,6 +40,24 @@ func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS,
 		"state": stateText,
 		"itemq": itemQuery,
 		"num":   func(n int) string { return group(int64(n)) },
+		// signed shows a change with its sign: "+1 234", "−56", "0".
+		"signed": func(n int64) string {
+			switch {
+			case n > 0:
+				return "+" + group(n)
+			case n < 0:
+				return "−" + group(-n)
+			}
+			return "0"
+		},
+		// dict builds a map for passing several values to a template.
+		"dict": func(kv ...any) map[string]any {
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i+1 < len(kv); i += 2 {
+				m[kv[i].(string)] = kv[i+1]
+			}
+			return m
+		},
 		"float": func(n int64) float64 { return float64(n) },
 		"kb":    func(b float64) int64 { return int64(b / 1024) },
 		"cap100": func(n int) int {
@@ -137,6 +155,9 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 		return
 	case "jobs":
 		w.render(rw, "jobs", map[string]any{"Jobs": w.store.Jobs()})
+		return
+	case "stats":
+		w.statsView(rw, q)
 		return
 	}
 

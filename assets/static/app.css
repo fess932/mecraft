@@ -221,6 +221,9 @@ select.btn option { background: #fff; color: #000; text-shadow: none; }
 
 /* Filters work on items and fluids alike. */
 #filters:not(:has(input[name=tab][value=items]:checked)):not(:has(input[name=tab][value=fluids]:checked)) .only-search { display: none; }
+/* The statistics have their own period and kind, and share the search. */
+#filters:not(:has(input[name=tab][value=stats]:checked)) .only-stats { display: none; }
+#filters:has(input[name=tab][value=stats]:checked) #q { display: block; }
 
 input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 input[type=number]::-webkit-inner-spin-button,
@@ -418,3 +421,41 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---- statistics -------------------------------------------------------- */
+
+.table-wrap { overflow-x: auto; }
+.stats {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.stats th { text-align: right; padding: 0 10px; font-weight: 400; }
+.stats th.item { text-align: left; padding-left: 6px; }
+.stats .sort {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.stats button.sort { cursor: pointer; }
+.stats button.sort:hover { color: var(--ink); }
+.stats .sort.on { color: var(--ink); font-weight: 500; }
+.stats td {
+  background: #b4b4b4;
+  padding: 4px 10px;
+  text-align: right;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 #d9d9d9, inset 0 -1px 0 #8a8a8a;
+}
+.stats td.item { text-align: left; padding-left: 6px; width: 100%; white-space: normal; }
+.stats td.item > div { display: flex; align-items: center; gap: 10px; min-width: 180px; }
+.stats .in { color: var(--ok); }
+.stats .out { color: var(--err); }
+.stats .net { font-weight: 500; }
+.stats .net.pos { color: var(--ok); }
+.stats .net.neg { color: var(--err); }
+.stats .unit, .stats .rate { color: var(--ink-soft); font-weight: 400; }
