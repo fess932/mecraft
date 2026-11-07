@@ -75,8 +75,9 @@ func (r Rule) Item() Item {
 type ruleState struct {
 	JobID   int64
 	NextTry time.Time
-	Fails   int   // failed orders in a row, drives the retry delay
-	Base    int64 // stock when the order was placed
+	Fails   int       // failed orders in a row, drives the retry delay
+	Base    int64     // stock when the order was placed
+	Settled time.Time // when the last order finished or failed
 	Note    string
 	Ordered time.Time
 }
@@ -385,6 +386,7 @@ func (m *Maintainer) Tick(now time.Time) {
 				s.Note = fmt.Sprintf("заказ #%d — %s; повтор через %s", s.JobID, reason, waitText(d))
 			}
 			s.JobID = 0
+			s.Settled = now
 		}
 		if now.Before(s.NextTry) {
 			continue
@@ -406,6 +408,14 @@ func (m *Maintainer) Tick(now time.Time) {
 		}
 		if !inNet || !it.Craftable {
 			s.Note = "нет шаблона крафта в ME"
+			continue
+		}
+		// A craft of this item is still running in ME: an order this rule
+		// lost track of (OC reconnected, the server restarted) or one made
+		// by hand. A CPU report older than our last finished order may
+		// still show that order, so only newer reports count.
+		if cpu, at, busy := m.store.CraftingIn(key); busy && !at.Before(s.Settled) {
+			s.Note = fmt.Sprintf("уже крафтится в ME (%s), ждёт", cpu)
 			continue
 		}
 		amount := r.Batch

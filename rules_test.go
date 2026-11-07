@@ -262,3 +262,43 @@ func TestMaintainerDrainStopsAtItemCap(t *testing.T) {
 		t.Fatalf("%d orders, want one more without a cap", len(fc.orders))
 	}
 }
+
+func TestMaintainerWaitsForCraftInCPU(t *testing.T) {
+	store := NewStore()
+	store.SetConnected(true, "test")
+	plat := Item{Name: "gt:ingot", Damage: 85, Label: "Платиновый слиток", Craftable: true}
+	store.BeginItems()
+	store.AddItems([]Item{plat})
+	store.EndItems()
+	rules := NewRules(filepath.Join(t.TempDir(), "mecraft.json"), defaultConfig())
+	if err := rules.Put(Rule{Key: plat.Key(), Name: plat.Name, Damage: plat.Damage, Label: plat.Label, Target: 1000, Batch: 64, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	fc := &fakeCrafter{store: store}
+	m := NewMaintainer(store, fc, rules, 5*time.Second)
+	note := func() string { return rules.Levels(store)[plat.Key()].Note }
+	busy := []CPU{{Name: "Большой", Busy: true, Output: plat.Key(), OutputLabel: plat.Label}}
+
+	// after a server restart the rule knows no order, but ME still crafts one
+	store.SetCPUs(busy)
+	now := time.Now().Add(time.Second)
+	m.Tick(now)
+	if len(fc.orders) != 0 || !strings.Contains(note(), "уже крафтится в ME (Большой)") {
+		t.Fatalf("%d orders, note %q; want to wait for the CPU", len(fc.orders), note())
+	}
+	store.SetCPUs([]CPU{{Name: "Большой"}})
+	m.Tick(now)
+	if len(fc.orders) != 1 {
+		t.Fatalf("%d orders, want one once the CPU is free", len(fc.orders))
+	}
+
+	// a CPU report older than the finished order does not hold the next one
+	store.SetCPUs(busy)
+	now = now.Add(time.Second)
+	store.ApplyItemDelta([]Item{{Name: plat.Name, Damage: plat.Damage, Label: plat.Label, Size: 64}})
+	store.UpdateJob(fc.orders[0], "done", "")
+	m.Tick(now)
+	if len(fc.orders) != 2 {
+		t.Fatalf("%d orders, want the next one at once (note %q)", len(fc.orders), note())
+	}
+}

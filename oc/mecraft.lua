@@ -291,11 +291,21 @@ local function sendStatus()
   local out = {}
   for i = 1, count(cpus) do
     local c = cpus[i]
+    -- What a busy CPU crafts, so the server never orders the same item
+    -- again while it is still in progress, even after a reconnect.
+    local output
+    if truthy(c.busy) and type(c.cpu) == "table" and c.cpu.finalOutput then
+      local ok, st = pcall(c.cpu.finalOutput)
+      if ok and type(st) == "table" and st.name then
+        output = itemOf(st)
+      end
+    end
     out[#out + 1] = {
       name = c.name or "",
       storage = c.storage or 0,
       coprocessors = c.coprocessors or 0,
       busy = truthy(c.busy),
+      output = output,
     }
   end
   send({ type = "cpus", cpus = out })

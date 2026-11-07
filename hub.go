@@ -51,10 +51,11 @@ func (w wireFluid) fluid() Fluid {
 }
 
 type wireCPU struct {
-	Name         string  `json:"name"`
-	Storage      float64 `json:"storage"`
-	Coprocessors float64 `json:"coprocessors"`
-	Busy         bool    `json:"busy"`
+	Name         string    `json:"name"`
+	Storage      float64   `json:"storage"`
+	Coprocessors float64   `json:"coprocessors"`
+	Busy         bool      `json:"busy"`
+	Output       *wireItem `json:"output"`
 }
 
 type inMsg struct {
@@ -174,7 +175,12 @@ func (h *Hub) dispatch(m inMsg) {
 	case "cpus":
 		cpus := make([]CPU, 0, len(m.CPUs))
 		for _, c := range m.CPUs {
-			cpus = append(cpus, CPU{Name: c.Name, Storage: int64(c.Storage), Coprocessors: int(c.Coprocessors), Busy: c.Busy})
+			cpu := CPU{Name: c.Name, Storage: int64(c.Storage), Coprocessors: int(c.Coprocessors), Busy: c.Busy}
+			if c.Busy && c.Output != nil && c.Output.Name != "" {
+				out := c.Output.item()
+				cpu.Output, cpu.OutputLabel = out.Key(), out.Label
+			}
+			cpus = append(cpus, cpu)
 		}
 		h.store.SetCPUs(cpus)
 	case "power":

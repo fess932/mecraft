@@ -237,6 +237,7 @@
   <li class="row">
     <span class="lamp {{if $c.Busy}}busy{{else}}on{{end}}">{{if $c.Busy}}Занят{{else}}Свободен{{end}}</span>
     <strong class="name">{{if $c.Name}}{{$c.Name}}{{else}}Процессор {{$i}}{{end}}</strong>
+    {{if $c.OutputLabel}}<span class="stat">крафтит {{$c.OutputLabel}}</span>{{end}}
     <span class="stat">память {{short $c.Storage}}</span>
     <span class="stat">сопроцессоров {{$c.Coprocessors}}</span>
   </li>

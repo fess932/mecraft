@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,6 +58,8 @@ type CPU struct {
 	Storage      int64
 	Coprocessors int
 	Busy         bool
+	Output       string // key of what a busy CPU crafts, if OC reports it
+	OutputLabel  string
 }
 
 type Power struct {
@@ -92,6 +95,7 @@ type Store struct {
 	staging   map[string]*Item
 	fluids    map[string]*Fluid
 	cpus      []CPU
+	cpusAt    time.Time
 	power     Power
 	jobs      []*Job
 	nextJob   int64
@@ -239,7 +243,24 @@ func (s *Store) ApplyFluidDelta(fluids []Fluid) {
 func (s *Store) SetCPUs(cpus []CPU) {
 	s.mu.Lock()
 	s.cpus = cpus
+	s.cpusAt = time.Now()
 	s.mu.Unlock()
+}
+
+// CraftingIn tells which busy CPU crafts the item, by the last CPU report,
+// and when that report came.
+func (s *Store) CraftingIn(key string) (cpu string, at time.Time, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i, c := range s.cpus {
+		if c.Busy && c.Output == key {
+			if c.Name == "" {
+				return fmt.Sprintf("процессор %d", i), s.cpusAt, true
+			}
+			return c.Name, s.cpusAt, true
+		}
+	}
+	return "", time.Time{}, false
 }
 
 func (s *Store) SetPower(p Power) {
