@@ -50,7 +50,8 @@ func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS,
 			}
 			return "0"
 		},
-		"add": func(a, b float64) float64 { return a + b },
+		"add":  func(a, b float64) float64 { return a + b },
+		"half": func(a float64) float64 { return a / 2 },
 		// dict builds a map for passing several values to a template.
 		"dict": func(kv ...any) map[string]any {
 			m := make(map[string]any, len(kv)/2)

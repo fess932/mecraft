@@ -448,6 +448,8 @@
     {{range .Grid}}<line class="grid" x1="{{$.X0}}" x2="{{printf "%.1f" (add $.X0 $.PW)}}" y1="{{printf "%.1f" .Pos}}" y2="{{printf "%.1f" .Pos}}"/>
     <text class="ylab" x="{{printf "%.1f" (add $.X0 -6.0)}}" y="{{printf "%.1f" (add .Pos 4.0)}}" text-anchor="end">{{.Label}}</text>{{end}}
     {{range .XTicks}}<text class="xlab" x="{{printf "%.1f" .Pos}}" y="{{printf "%.1f" (add $.H -6.0)}}" text-anchor="{{.Anchor}}">{{.Label}}</text>{{end}}
+    {{if gt .NoData 0.0}}<rect class="nodata" x="{{$.X0}}" y="{{$.Y0}}" width="{{printf "%.1f" .NoData}}" height="{{$.PH}}"/>
+    {{if gt .NoData 90.0}}<text class="nodata-text" x="{{printf "%.1f" (add $.X0 (half .NoData))}}" y="{{printf "%.1f" (add $.Y0 (half $.PH))}}" text-anchor="middle">нет данных</text>{{end}}{{end}}
     {{range .Lines}}<polyline class="line" points="{{.Points}}" stroke="{{.Color}}"/>{{end}}
     {{range .Cols}}<rect class="col" x="{{printf "%.2f" .X}}" y="{{$.Y0}}" width="{{printf "%.2f" .W}}" height="{{$.PH}}" data-title="{{.Title}}" data-lines="{{.Lines}}"/>{{end}}
   </svg>

@@ -20,15 +20,26 @@ type statPeriod struct {
 	Step    time.Duration
 	Tick    time.Duration
 	PerHour bool // chart rates per hour instead of per minute
+	// Smooth averages each point with the ones before it: machines put
+	// out in batches, and short buckets catch a batch or a pause.
+	Smooth int
 }
 
 var statPeriodList = []statPeriod{
-	{"10m", 10 * time.Minute, 10 * time.Second, 2 * time.Minute, false},
-	{"1h", time.Hour, time.Minute, 10 * time.Minute, false},
-	{"6h", 6 * time.Hour, 5 * time.Minute, time.Hour, false},
-	{"24h", 24 * time.Hour, 15 * time.Minute, 4 * time.Hour, false},
-	{"7d", 7 * 24 * time.Hour, 2 * time.Hour, 24 * time.Hour, true},
-	{"30d", 30 * 24 * time.Hour, 6 * time.Hour, 5 * 24 * time.Hour, true},
+	{"10m", 10 * time.Minute, 10 * time.Second, 2 * time.Minute, false, 3},
+	{"1h", time.Hour, time.Minute, 10 * time.Minute, false, 1},
+	{"6h", 6 * time.Hour, 5 * time.Minute, time.Hour, false, 1},
+	{"24h", 24 * time.Hour, 15 * time.Minute, 4 * time.Hour, false, 1},
+	{"7d", 7 * 24 * time.Hour, 2 * time.Hour, 24 * time.Hour, true, 1},
+	{"30d", 30 * 24 * time.Hour, 6 * time.Hour, 5 * 24 * time.Hour, true, 1},
+}
+
+// sinceStep is the resolution Stats.Since reads for a span.
+func sinceStep(span time.Duration) time.Duration {
+	if span <= statsMinuteKeep {
+		return time.Minute
+	}
+	return time.Hour
 }
 
 // findPeriod returns the period with the given key, an hour by default.
@@ -63,6 +74,9 @@ type Chart struct {
 	Cols           []ChartCol
 	Unit           string // "в минуту" or "в час"
 	Aria           string
+	// NoData is the width of the part on the left the history does not
+	// reach yet; zero when it covers the whole chart.
+	NoData float64
 }
 
 type ChartLine struct {
@@ -128,8 +142,16 @@ func (w *Web) statsCharts(rw http.ResponseWriter, q url.Values) {
 	now := time.Now()
 
 	var flows map[string]Flow
+	// Rates count only the time with data, not the whole period: right
+	// after the first start there are a few minutes of history at most.
+	covered := p.Span
+	chartFrom := time.Time{}
 	if w.hub.Stats != nil {
 		flows = w.hub.Stats.Since(now.Add(-p.Span))
+		if known := w.hub.Stats.Known(sinceStep(p.Span)); now.Sub(known) < covered {
+			covered = max(now.Sub(known), time.Minute)
+		}
+		chartFrom = w.hub.Stats.Known(p.Step)
 	}
 	items := map[string]Item{}
 	itemOf := func(k string) Item {
@@ -146,7 +168,7 @@ func (w *Web) statsCharts(rw http.ResponseWriter, q url.Values) {
 	for i, k := range sel {
 		color[k] = chartColors[i]
 	}
-	spanMin := p.Span.Minutes()
+	spanMin := covered.Minutes()
 	for _, sd := range sides {
 		var rows []SideRow
 		for k, f := range flows {
@@ -241,7 +263,7 @@ func (w *Web) statsCharts(rw http.ResponseWriter, q url.Values) {
 			it := itemOf(l.key)
 			cl = append(cl, chartLine{label: it.Label, unit: it.Unit(), color: l.color, amounts: vals})
 		}
-		sd.Chart = buildChart(cl, p, to, n)
+		sd.Chart = buildChart(cl, p, to, n, chartFrom)
 		sd.Chart.Aria = sd.Title + " за период, " + sd.Chart.Unit
 	}
 
@@ -254,20 +276,35 @@ type chartLine struct {
 }
 
 // buildChart lays out the lines of one chart. Amounts per bucket become
-// rates per minute (or per hour for long periods).
-func buildChart(lines []chartLine, p statPeriod, to time.Time, n int) Chart {
+// rates per minute (or per hour for long periods). Buckets that end before
+// known, when the history begins, are left out.
+func buildChart(lines []chartLine, p statPeriod, to time.Time, n int, known time.Time) Chart {
 	c := Chart{W: 560, H: 236, X0: 56, Y0: 10, PW: 494, PH: 198, Unit: "в минуту"}
 	per := p.Step.Minutes()
 	if p.PerHour {
 		per = p.Step.Hours()
 		c.Unit = "в час"
 	}
+	if p.Smooth > 1 {
+		c.Unit += ", среднее за " + spanText(time.Duration(p.Smooth)*p.Step)
+	}
+	from := to.Add(-time.Duration(n) * p.Step)
+	first := 0 // first bucket with data
+	if known.After(from) {
+		first = min(n, int(known.Sub(from)/p.Step))
+	}
 	rates := make([][]float64, len(lines))
 	top := 0.0
 	for i, l := range lines {
 		rates[i] = make([]float64, n)
-		for j, a := range l.amounts {
-			v := a / per
+		for j := first; j < n && j < len(l.amounts); j++ {
+			// trailing average over the buckets with data
+			sum, cnt := 0.0, 0
+			for k := j; k > j-max(p.Smooth, 1) && k >= first; k-- {
+				sum += l.amounts[k]
+				cnt++
+			}
+			v := sum / float64(cnt) / per
 			rates[i][j] = v
 			top = max(top, v)
 		}
@@ -278,7 +315,6 @@ func buildChart(lines []chartLine, p statPeriod, to time.Time, n int) Chart {
 		c.Grid = append(c.Grid, Tick{Pos: c.Y0 + c.PH - v/top*c.PH, Label: rateText(v)})
 	}
 
-	from := to.Add(-time.Duration(n) * p.Step)
 	xAt := func(t time.Time) float64 {
 		return c.X0 + float64(t.Sub(from))/float64(to.Sub(from))*c.PW
 	}
@@ -293,11 +329,12 @@ func buildChart(lines []chartLine, p statPeriod, to time.Time, n int) Chart {
 	}
 
 	bw := c.PW / float64(n)
+	c.NoData = float64(first) * bw
 	yOf := func(v float64) float64 { return c.Y0 + c.PH - v/top*c.PH }
 	for i, l := range lines {
 		var b strings.Builder
-		for j, v := range rates[i] {
-			fmt.Fprintf(&b, "%.1f,%.1f ", c.X0+(float64(j)+0.5)*bw, yOf(v))
+		for j := first; j < n; j++ {
+			fmt.Fprintf(&b, "%.1f,%.1f ", c.X0+(float64(j)+0.5)*bw, yOf(rates[i][j]))
 		}
 		c.Lines = append(c.Lines, ChartLine{Color: l.color, Points: strings.TrimSpace(b.String())})
 	}
@@ -308,6 +345,11 @@ func buildChart(lines []chartLine, p statPeriod, to time.Time, n int) Chart {
 	for j := range n {
 		start := from.Add(time.Duration(j) * p.Step)
 		col := ChartCol{X: c.X0 + float64(j)*bw, W: bw, Title: bucketText(start, p)}
+		if j < first {
+			col.Lines = "нет данных: сервер ещё не записывал"
+			c.Cols = append(c.Cols, col)
+			continue
+		}
 		type val struct {
 			text string
 			v    float64

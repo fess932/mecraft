@@ -62,6 +62,9 @@ type Stats struct {
 	// tens holds the last statsTensKeep in 10-second buckets, in memory
 	// only, for the shortest chart.
 	tens map[int64]map[uint32]Flow
+	// started is when this server began recording; nothing before it is
+	// known at 10-second detail.
+	started time.Time
 
 	now func() time.Time
 }
@@ -102,6 +105,7 @@ func openStats(dir string, now func() time.Time) (*Stats, error) {
 		return nil, err
 	}
 	s.curMin = unixMinute(now())
+	s.started = now()
 	return s, nil
 }
 
@@ -549,4 +553,31 @@ func (s *Stats) Series(keys []string, to time.Time, step time.Duration, n int) m
 		put(time.Unix(s.curMin*60, 0), cur)
 	}
 	return out
+}
+
+// Known tells from when the history at a resolution has data: the 10-second
+// buckets (step under a minute) start with this server, the minutes and
+// hours with the oldest bucket kept (or this server, if that is later
+// than nothing). Charts and rates leave out the time before it.
+func (s *Stats) Known(step time.Duration) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if step < time.Minute {
+		return s.started
+	}
+	oldest := s.started
+	if step < time.Hour {
+		for m := range s.minutes {
+			if t := time.Unix(m*60, 0); t.Before(oldest) {
+				oldest = t
+			}
+		}
+		return oldest
+	}
+	for h := range s.hours {
+		if t := time.Unix(h*3600, 0); t.Before(oldest) {
+			oldest = t
+		}
+	}
+	return oldest
 }
