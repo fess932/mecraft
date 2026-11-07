@@ -189,16 +189,27 @@ end
 
 local itemDelta, fluidDelta = {}, {}
 
+-- Besides the net change (size/amount) a delta carries out: how much left
+-- the network in total, so the server can tell income from spending even
+-- when both happen within one batch.
+local function outOf(n)
+  return n < 0 and -n or 0
+end
+
 local function onItems(_, ...)
   for i = 1, select("#", ...) do
     local s = select(i, ...)
     if type(s) == "table" and s.name then
       local k = s.name .. "|" .. tostring(s.damage or 0) .. "|" .. tostring(s.label)
       local d = itemDelta[k]
+      local n = s.size or 0
       if d then
-        d.size = d.size + (s.size or 0)
+        d.size = d.size + n
+        d.out = d.out + outOf(n)
       else
-        itemDelta[k] = itemOf(s)
+        d = itemOf(s)
+        d.out = outOf(n)
+        itemDelta[k] = d
       end
     end
   end
@@ -209,13 +220,22 @@ local function onFluids(_, ...)
     local s = select(i, ...)
     if type(s) == "table" and s.name then
       local d = fluidDelta[s.name]
+      local n = s.amount or 0
       if d then
-        d.amount = d.amount + (s.amount or 0)
+        d.amount = d.amount + n
+        d.out = d.out + outOf(n)
       else
-        fluidDelta[s.name] = fluidOf(s)
+        d = fluidOf(s)
+        d.out = outOf(n)
+        fluidDelta[s.name] = d
       end
     end
   end
+end
+
+-- withOut appends the out field to an encoded stack.
+local function withOut(enc, v)
+  return enc:sub(1, -2) .. ",out=" .. num(v.out) .. "}"
 end
 
 local function flushDeltas()
@@ -224,8 +244,8 @@ local function flushDeltas()
 
   local parts = {}
   for _, v in pairs(items) do
-    if v.size ~= 0 then
-      parts[#parts + 1] = encItem(v)
+    if v.size ~= 0 or v.out > 0 then
+      parts[#parts + 1] = withOut(encItem(v), v)
       if #parts >= BATCH then
         sendList("item_delta", "items", parts)
         parts = {}
@@ -238,8 +258,8 @@ local function flushDeltas()
 
   parts = {}
   for _, v in pairs(fluids) do
-    if v.amount ~= 0 then
-      parts[#parts + 1] = encFluid(v)
+    if v.amount ~= 0 or v.out > 0 then
+      parts[#parts + 1] = withOut(encFluid(v), v)
     end
   end
   if #parts > 0 then
