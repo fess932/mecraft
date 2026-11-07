@@ -162,3 +162,28 @@ func TestStatsSeries(t *testing.T) {
 		t.Fatalf("hour buckets %+v", ser["a"])
 	}
 }
+
+func TestDropRecount(t *testing.T) {
+	s := NewStore()
+	s.BeginItems()
+	s.AddItems([]Item{{Name: "d", Label: "D", Size: 33500}, {Name: "s", Label: "S", Size: 500}})
+	s.EndItems()
+	h := NewHub(s, "")
+	cases := []struct {
+		key                string
+		net, out, wn, wout float64
+	}{
+		{"d|0|D", 33495, 0, 0, 0},       // whole stock announced again
+		{"d|0|D", -33494, 33494, 0, 0},  // whole stock gone, not true
+		{"d|0|D", 3, 33494, 3, 0},       // -all and +all in one batch
+		{"d|0|D", 4, 0, 4, 0},           // a real change
+		{"d|0|D", -500, 700, -500, 700}, // big but real spending
+		{"s|0|S", 600, 0, 600, 0},       // small stocks are not judged
+	}
+	for _, c := range cases {
+		n, o := h.dropRecount(c.key, c.net, c.out)
+		if n != c.wn || o != c.wout {
+			t.Errorf("%s %v/%v: got %v/%v, want %v/%v", c.key, c.net, c.out, n, o, c.wn, c.wout)
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"strings"
 	"sync"
@@ -172,6 +173,10 @@ func (h *Hub) dispatch(m inMsg) {
 	case "items_end":
 		h.recordFix(h.store.EndItems())
 	case "item_delta":
+		for i := range m.Items {
+			w := &m.Items[i]
+			w.Size, w.Out = h.dropRecount(w.item().Key(), w.Size, w.Out)
+		}
 		h.store.ApplyItemDelta(convertItems(m.Items))
 		if h.Stats != nil {
 			flows := map[string]Flow{}
@@ -185,6 +190,10 @@ func (h *Hub) dispatch(m inMsg) {
 	case "fluids":
 		h.recordFix(h.store.SetFluids(convertFluids(m.Fluids)))
 	case "fluid_delta":
+		for i := range m.Fluids {
+			w := &m.Fluids[i]
+			w.Amount, w.Out = h.dropRecount(fluidKeyPrefix+w.Name, w.Amount, w.Out)
+		}
 		h.store.ApplyFluidDelta(convertFluids(m.Fluids))
 		if h.Stats != nil {
 			flows := map[string]Flow{}
@@ -329,6 +338,9 @@ func (h *Hub) Resync() error {
 // addFlow turns a delta into income and spending. Scripts older than the
 // out field send only the net change.
 func addFlow(flows map[string]Flow, key string, net, out int64) {
+	if net == 0 && out == 0 {
+		return
+	}
 	if out == 0 && net < 0 {
 		out = -net
 	}
@@ -347,4 +359,31 @@ func (h *Hub) recordFix(diff map[string]int64) {
 		flows[k] = Flow{Fix: d}
 	}
 	h.Stats.Record(flows)
+}
+
+// Recounts: when a storage bus rereads its inventory, AE2 may report the
+// whole stock of an item leaving or arriving (+33495 with 33500 stored)
+// without the matching opposite change. A change of at least
+// recountShare of a stock of recountMin or more is taken for one.
+const (
+	recountMin   = 1000
+	recountShare = 0.9
+)
+
+// dropRecount strips a recount from a delta: a net change that size is
+// dropped (the next full sync fixes the stock if it was real), and so is
+// spending that size whose arrival came in the same batch.
+func (h *Hub) dropRecount(key string, net, out float64) (float64, float64) {
+	it, _ := h.store.FindItem(key)
+	have := float64(it.Size)
+	if have < recountMin {
+		return net, out
+	}
+	if math.Abs(net) >= recountShare*have {
+		return 0, 0
+	}
+	if out >= recountShare*have {
+		out = math.Max(0, -net)
+	}
+	return net, out
 }
