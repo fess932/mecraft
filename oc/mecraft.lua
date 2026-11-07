@@ -294,8 +294,10 @@ local function sendStatus()
     -- What a busy CPU crafts, so the server never orders the same item
     -- again while it is still in progress, even after a reconnect.
     local output
-    if truthy(c.busy) and type(c.cpu) == "table" and c.cpu.finalOutput then
-      local ok, st = pcall(c.cpu.finalOutput)
+    -- c.cpu is an OC value (userdata), so call it inside pcall: older AE2
+    -- builds have no finalOutput.
+    if truthy(c.busy) and c.cpu ~= nil then
+      local ok, st = pcall(function() return c.cpu.finalOutput() end)
       if ok and type(st) == "table" and st.name then
         output = itemOf(st)
       end
