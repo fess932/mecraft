@@ -51,7 +51,8 @@ local function on(name, ...)
       if n > 0 then plus = plus + n else minus = minus - n end
       if shown < 8 then
         shown = shown + 1
-        print(string.format("событие #%d, аргумент %d из %d: %s", events, i, args.n, ser.serialize(s)))
+        print(string.format("событие #%d от %s, аргумент %d из %d: size=%s", events,
+          tostring(args[1]):sub(1, 8), i, args.n, tostring(s.size)))
       end
     end
   end
@@ -60,6 +61,9 @@ end
 -- AE2 sends the events only once someone subscribed; mecraft does it at
 -- start. Turn it on here too and leave it on: mecraft may be running.
 if me and me.setItemEventSubscription then
+  -- off first: if every call adds a listener, repeated runs would double
+  -- each event
+  pcall(me.setItemEventSubscription, false)
   local ok, res = pcall(me.setItemEventSubscription, true)
   print("подписка: " .. (ok and "включена" or "ошибка") .. (res ~= nil and (", " .. tostring(res)) or ""))
 else
@@ -69,6 +73,7 @@ end
 -- Pull every signal the way mecraft does and count them by name, so a
 -- different event name or none at all shows up too.
 local before = stock()
+print("компонент ME: " .. tostring(me and me.address):sub(1, 8))
 print("в сети было: " .. tostring(before) .. ", слушаю " .. secs .. " с...")
 local names, firstOther = {}, nil
 local deadline = computer.uptime() + secs
