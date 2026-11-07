@@ -60,7 +60,8 @@ end
 -- AE2 sends the events only once someone subscribed; mecraft does it at
 -- start. Turn it on here too and leave it on: mecraft may be running.
 if me and me.setItemEventSubscription then
-  print("подписка: " .. tostring(select(2, pcall(me.setItemEventSubscription, true))))
+  local ok, res = pcall(me.setItemEventSubscription, true)
+  print("подписка: " .. (ok and "включена" or "ошибка") .. (res ~= nil and (", " .. tostring(res)) or ""))
 else
   print("подписки на события нет в этом компоненте")
 end
