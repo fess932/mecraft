@@ -37,18 +37,24 @@
           <option value="name">По названию</option>
         </select>
         <label class="toggle only-search" title="Только то, для чего задан уровень"><input type="checkbox" name="ruled" value="1"><span>Уровни</span></label>
+        <select class="btn only-stats" name="sview" aria-label="Вид">
+          <option value="">Графики</option>
+          <option value="table">Таблица</option>
+        </select>
         <select class="btn only-stats" name="period" aria-label="Период">
-          <option value="1h">За час</option>
+          <option value="10m">За 10 минут</option>
+          <option value="1h" selected>За час</option>
           <option value="6h">За 6 часов</option>
           <option value="24h">За сутки</option>
           <option value="7d">За неделю</option>
           <option value="30d">За месяц</option>
         </select>
         <select class="btn only-stats" name="kind" aria-label="Что показывать">
+          <option value="items" selected>Предметы</option>
+          <option value="fluids">Жидкости</option>
           <option value="">Предметы и жидкости</option>
-          <option value="items">Только предметы</option>
-          <option value="fluids">Только жидкости</option>
         </select>
+        <input type="hidden" name="sel" value="">
         <input type="hidden" name="ssort" value="net">
         <input type="hidden" name="sdir" value="desc">
         <span id="flash" role="status"></span>
@@ -81,7 +87,7 @@
     if (typeof s.ruled === 'boolean') f.elements.ruled.checked = s.ruled;
     if (s.sort) f.elements.sort.value = s.sort;
     if (typeof s.q === 'string') f.elements.q.value = s.q;
-    ['period', 'kind', 'ssort', 'sdir'].forEach(function (n) {
+    ['sview', 'period', 'kind', 'sel', 'ssort', 'sdir'].forEach(function (n) {
       if (typeof s[n] === 'string') f.elements[n].value = s[n];
     });
     function save() {
@@ -94,6 +100,8 @@
           ruled: f.elements.ruled.checked,
           sort: f.elements.sort.value,
           q: f.elements.q.value,
+          sview: f.elements.sview.value,
+          sel: f.elements.sel.value,
           period: f.elements.period.value,
           kind: f.elements.kind.value,
           ssort: f.elements.ssort.value,
@@ -119,6 +127,24 @@
       f.elements.sdir.value = col === 'name' ? 'asc' : 'desc';
     }
     htmx.trigger(f, 'change');
+  }
+
+  // toggleSel adds an item to the charts or takes it off; the selection is
+  // shared by both halves and capped by the number of line colours.
+  function toggleSel(btn, max) {
+    var f = document.getElementById('filters');
+    var sel = f.elements.sel.value ? f.elements.sel.value.split('\u001f') : [];
+    var i = sel.indexOf(btn.dataset.key);
+    if (i >= 0) sel.splice(i, 1);
+    else if (sel.length < max) sel.push(btn.dataset.key);
+    else return;
+    f.elements.sel.value = sel.join('\u001f');
+    f.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function clearSel() {
+    var f = document.getElementById('filters');
+    f.elements.sel.value = '';
+    f.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function showMore(step) {
@@ -414,4 +440,47 @@
   <span>Показано {{num .Shown}} из {{num .Total}}</span>
   {{if .More}}<button type="button" class="btn" onclick="showMore({{.Step}})">Показать ещё</button>{{end}}
 </footer>
+{{end}}
+
+{{define "chart"}}
+<div class="chartbox">
+  <svg class="chart" viewBox="0 0 {{.W}} {{.H}}" role="img" aria-label="{{.Aria}}">
+    {{range .Grid}}<line class="grid" x1="{{$.X0}}" x2="{{printf "%.1f" (add $.X0 $.PW)}}" y1="{{printf "%.1f" .Pos}}" y2="{{printf "%.1f" .Pos}}"/>
+    <text class="ylab" x="{{printf "%.1f" (add $.X0 -6.0)}}" y="{{printf "%.1f" (add .Pos 4.0)}}" text-anchor="end">{{.Label}}</text>{{end}}
+    {{range .XTicks}}<text class="xlab" x="{{printf "%.1f" .Pos}}" y="{{printf "%.1f" (add $.H -6.0)}}" text-anchor="{{.Anchor}}">{{.Label}}</text>{{end}}
+    {{range .Lines}}<polyline class="line" points="{{.Points}}" stroke="{{.Color}}"/>{{end}}
+    {{range .Cols}}<rect class="col" x="{{printf "%.2f" .X}}" y="{{$.Y0}}" width="{{printf "%.2f" .W}}" height="{{$.PH}}" data-title="{{.Title}}" data-lines="{{.Lines}}"/>{{end}}
+  </svg>
+  <span class="unit-note">{{.Unit}}</span>
+</div>
+{{end}}
+
+{{define "statcharts"}}
+<div class="sides">
+{{range .Sides}}
+  <section class="side {{.Kind}}" aria-label="{{.Title}}">
+    <h2 class="side-title">{{.Title}}</h2>
+    {{template "chart" .Chart}}
+    {{if .Empty}}
+      <p class="hint">За этот период ничего не {{if eq .Kind "in"}}приходило{{else}}уходило{{end}}.</p>
+    {{else if .Auto}}
+      <p class="hint">На графике пять самых больших. Отметь квадратиками, что сравнить, — до {{$.Max}} предметов на обоих графиках.</p>
+    {{else}}
+      <p class="hint">На графике отмеченное: {{$.Selected}} из {{$.Max}}. <button type="button" class="link" onclick="clearSel()">Сбросить</button></p>
+    {{end}}
+    <ul class="flows">
+    {{range .Rows}}
+      <li class="flow">
+        <button type="button" class="mark{{if .On}} on{{else if .Auto}} auto{{end}}" style="{{.Style}}" data-key="{{.Key}}"
+                onclick="toggleSel(this, {{$.Max}})" aria-pressed="{{.On}}" aria-label="На графике: {{.Label}}"></button>
+        <span class="slot mini" data-title="{{.Label}}" data-mod="{{mod .Name}}" data-lines="{{group .Amount}} {{.Unit}} за период&#10;{{.Rate}}&#10;{{.Name}}{{if not .Fluid}}:{{.Damage}}{{end}}"><img src="{{icon .Label}}" width="32" height="32" loading="lazy" alt=""></span>
+        <span class="fname"><span class="label">{{.Label}}</span><span class="fbar" aria-hidden="true"><span style="width: {{.Bar}}%"></span></span></span>
+        <span class="famt">{{short .Amount}} <span class="unit">{{.Unit}}</span><span class="rate">{{.Rate}}</span></span>
+      </li>
+    {{end}}
+    </ul>
+    {{if .More}}<p class="hint">и ещё {{.More}} — уточни поиском</p>{{end}}
+  </section>
+{{end}}
+</div>
 {{end}}

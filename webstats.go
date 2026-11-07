@@ -9,15 +9,6 @@ import (
 	"time"
 )
 
-// statsPeriods are the periods of the statistics tab, by form value.
-var statsPeriods = map[string]time.Duration{
-	"1h":  time.Hour,
-	"6h":  6 * time.Hour,
-	"24h": 24 * time.Hour,
-	"7d":  7 * 24 * time.Hour,
-	"30d": 30 * 24 * time.Hour,
-}
-
 // StatRow is one item of the statistics table.
 type StatRow struct {
 	Item
@@ -30,10 +21,7 @@ func (r StatRow) Net() int64 { return r.Flow.Net() }
 // statsView renders the income and spending of every item over a period,
 // filtered by the search and sorted by a column.
 func (w *Web) statsView(rw http.ResponseWriter, q url.Values) {
-	period, ok := statsPeriods[q.Get("period")]
-	if !ok {
-		period = time.Hour
-	}
+	period := findPeriod(q.Get("period")).Span
 	kind := q.Get("kind")
 	text := strings.ToLower(strings.TrimSpace(q.Get("q")))
 	col, desc := q.Get("ssort"), q.Get("sdir") != "asc"
@@ -69,7 +57,7 @@ func (w *Web) statsView(rw http.ResponseWriter, q url.Values) {
 	w.render(rw, "stats", map[string]any{
 		"Rows": rows, "Total": total, "Shown": len(rows), "More": total > len(rows),
 		"Step": pageStep, "Sort": col, "Desc": desc, "Long": period > time.Hour,
-		"Searched": text != "" || kind != "",
+		"Searched": text != "",
 	})
 }
 

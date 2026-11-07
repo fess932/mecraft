@@ -50,6 +50,7 @@ func NewWeb(store *Store, hub *Hub, icons *Icons, rules *Rules, templates fs.FS,
 			}
 			return "0"
 		},
+		"add": func(a, b float64) float64 { return a + b },
 		// dict builds a map for passing several values to a template.
 		"dict": func(kv ...any) map[string]any {
 			m := make(map[string]any, len(kv)/2)
@@ -157,7 +158,11 @@ func (w *Web) view(rw http.ResponseWriter, r *http.Request) {
 		w.render(rw, "jobs", map[string]any{"Jobs": w.store.Jobs()})
 		return
 	case "stats":
-		w.statsView(rw, q)
+		if q.Get("sview") == "table" {
+			w.statsView(rw, q)
+		} else {
+			w.statsCharts(rw, q)
+		}
 		return
 	}
 
