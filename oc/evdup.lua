@@ -109,3 +109,21 @@ print("без копий в пределах 5 тиков:   " .. total(5))
 print("без любых копий подряд:         " .. total(nil))
 local big = math.max(1000, math.floor(before / 2))
 print("без копий и без записей >= " .. big .. ": " .. total(nil, big))
+
+-- what mecraft does: drop every second copy within the same tick, net the
+-- event, and skip a change of 90% of the stock or more (stock >= 1000)
+local s, have, prev, dropped = 0, before, nil, false
+for _, r in ipairs(recs) do
+  local copy = prev and prev.sig == r.sig and ticks(r) == ticks(prev) and r.n <= 8 and not dropped
+  if copy then
+    dropped = true
+  else
+    dropped = false
+    local n = sum(r)
+    if not (have >= 1000 and math.abs(n) >= 0.9 * have) then
+      s, have = s + n, have + n
+    end
+  end
+  prev = r
+end
+print("правило mecraft:                " .. s)
