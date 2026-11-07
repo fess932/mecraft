@@ -196,11 +196,50 @@ local function outOf(n)
   return n < 0 and -n or 0
 end
 
+-- AE2 sends every small change twice in the same tick (seen in game with
+-- items behind storage buses). An event that repeats the previous one in
+-- the same tick is dropped; a third copy counts again, so two real equal
+-- changes in one tick (four events) still count twice.
+local DUP_STACKS = 8 -- only small events are compared
+local function sigOf(...)
+  local n = select("#", ...)
+  if n > DUP_STACKS then
+    return nil
+  end
+  local parts = {}
+  for i = 1, n do
+    local s = select(i, ...)
+    if type(s) == "table" then
+      parts[#parts + 1] = tostring(s.name) .. "|" .. tostring(s.damage) .. "|" ..
+        tostring(s.label) .. "=" .. tostring(s.size or s.amount)
+    end
+  end
+  return table.concat(parts, ";")
+end
+
+local function newDedup()
+  local lastSig, lastT, dropped = nil, nil, false
+  -- returns true when the event is a copy to drop
+  return function(...)
+    local sig, t = sigOf(...), computer.uptime()
+    if sig and sig == lastSig and t == lastT and not dropped then
+      dropped = true
+      return true
+    end
+    lastSig, lastT, dropped = sig, t, false
+    return false
+  end
+end
+local itemDup, fluidDup = newDedup(), newDedup()
+
 -- An event lists the changes of one moment, and AE2 may list one stack
 -- twice when it moves it inside the network (-32770 and +32770 when cells
 -- or storage buses reshuffle). Net them per item first, so only what
 -- really came or left counts as income or spending.
-local function onItems(_, ...)
+local function onItems(_, _, ...)
+  if itemDup(...) then
+    return
+  end
   local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
@@ -227,7 +266,10 @@ local function onItems(_, ...)
   end
 end
 
-local function onFluids(_, ...)
+local function onFluids(_, _, ...)
+  if fluidDup(...) then
+    return
+  end
   local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
