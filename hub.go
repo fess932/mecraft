@@ -51,11 +51,12 @@ func (w wireFluid) fluid() Fluid {
 }
 
 type wireCPU struct {
-	Name         string    `json:"name"`
-	Storage      float64   `json:"storage"`
-	Coprocessors float64   `json:"coprocessors"`
-	Busy         bool      `json:"busy"`
-	Output       *wireItem `json:"output"`
+	Name         string     `json:"name"`
+	Storage      float64    `json:"storage"`
+	Coprocessors float64    `json:"coprocessors"`
+	Busy         bool       `json:"busy"`
+	Output       *wireItem  `json:"output"`
+	Parts        []wireItem `json:"parts"`
 }
 
 type inMsg struct {
@@ -179,6 +180,12 @@ func (h *Hub) dispatch(m inMsg) {
 			if c.Busy && c.Output != nil && c.Output.Name != "" {
 				out := c.Output.item()
 				cpu.Output, cpu.OutputLabel = out.Key(), out.Label
+			}
+			if c.Busy {
+				for _, it := range convertItems(c.Parts) {
+					cpu.Parts = append(cpu.Parts, it.Key())
+					cpu.PartLabels = append(cpu.PartLabels, it.Label)
+				}
 			}
 			cpus = append(cpus, cpu)
 		}

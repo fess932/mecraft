@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +61,10 @@ type CPU struct {
 	Busy         bool
 	Output       string // key of what a busy CPU crafts, if OC reports it
 	OutputLabel  string
+	// Without a Crafting Monitor OC cannot tell the final output; then
+	// Parts lists what the CPU crafts now or still has to craft.
+	Parts      []string
+	PartLabels []string
 }
 
 type Power struct {
@@ -253,7 +258,7 @@ func (s *Store) CraftingIn(key string) (cpu string, at time.Time, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i, c := range s.cpus {
-		if c.Busy && c.Output == key {
+		if c.Busy && (c.Output == key || slices.Contains(c.Parts, key)) {
 			if c.Name == "" {
 				return fmt.Sprintf("процессор %d", i), s.cpusAt, true
 			}
@@ -469,4 +474,21 @@ func (s *Store) Status() Status {
 		Power:     s.power,
 		Failure:   s.failure,
 	}
+}
+
+// Doing says what a busy CPU crafts: the final output when OC knows it,
+// otherwise the first few items in progress.
+func (c CPU) Doing() string {
+	if c.OutputLabel != "" {
+		return "крафтит " + c.OutputLabel
+	}
+	if len(c.PartLabels) == 0 {
+		return ""
+	}
+	const show = 3
+	s := "в работе: " + strings.Join(c.PartLabels[:min(show, len(c.PartLabels))], ", ")
+	if n := len(c.PartLabels) - show; n > 0 {
+		s += fmt.Sprintf(" и ещё %d", n)
+	}
+	return s
 }

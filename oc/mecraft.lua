@@ -24,6 +24,7 @@ end
 local BATCH = 64           -- stacks per message (small: OC memory is tight)
 local FLUSH_EVERY = 0.5    -- seconds between sending accumulated changes
 local STATUS_EVERY = 5     -- seconds between CPU/power reports
+local CPU_PARTS = 32       -- items in progress reported per busy CPU
 local RESYNC_EVERY = 300   -- seconds between full resyncs (fixes lost events)
 
 if not component.isAvailable("internet") then
@@ -293,13 +294,28 @@ local function sendStatus()
     local c = cpus[i]
     -- What a busy CPU crafts, so the server never orders the same item
     -- again while it is still in progress, even after a reconnect.
-    local output
-    -- c.cpu is an OC value (userdata), so call it inside pcall: older AE2
-    -- builds have no finalOutput.
+    local output, parts
+    -- c.cpu is an OC value (userdata), so call it inside pcall.
+    -- finalOutput needs a Crafting Monitor on the CPU; without one, report
+    -- what the CPU crafts now and what it still has to craft.
     if truthy(c.busy) and c.cpu ~= nil then
       local ok, st = pcall(function() return c.cpu.finalOutput() end)
       if ok and type(st) == "table" and st.name then
         output = itemOf(st)
+      else
+        parts = {}
+        for _, m in ipairs({ "activeItems", "pendingItems" }) do
+          local lok, list = pcall(function() return c.cpu[m]() end)
+          if lok and type(list) == "table" then
+            for j = 1, count(list) do
+              local s = list[j]
+              if #parts >= CPU_PARTS then break end
+              if type(s) == "table" and s.name then
+                parts[#parts + 1] = { name = s.name, damage = s.damage or 0, label = s.label or s.name }
+              end
+            end
+          end
+        end
       end
     end
     out[#out + 1] = {
@@ -308,6 +324,7 @@ local function sendStatus()
       coprocessors = c.coprocessors or 0,
       busy = truthy(c.busy),
       output = output,
+      parts = parts,
     }
   end
   send({ type = "cpus", cpus = out })

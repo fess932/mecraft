@@ -302,3 +302,17 @@ func TestMaintainerWaitsForCraftInCPU(t *testing.T) {
 		t.Fatalf("%d orders, want the next one at once (note %q)", len(fc.orders), note())
 	}
 }
+
+func TestCraftingInFindsItemsInProgress(t *testing.T) {
+	store := NewStore()
+	store.SetCPUs([]CPU{{Busy: true, Parts: []string{"a|0|A", "b|0|B"}, PartLabels: []string{"A", "B"}}})
+	if cpu, _, ok := store.CraftingIn("b|0|B"); !ok || cpu != "процессор 0" {
+		t.Fatalf("got %q %v, want the item in progress to count", cpu, ok)
+	}
+	if _, _, ok := store.CraftingIn("c|0|C"); ok {
+		t.Fatal("an item not in progress counts")
+	}
+	if d := store.CPUs()[0].Doing(); d != "в работе: A, B" {
+		t.Fatalf("doing %q", d)
+	}
+}
