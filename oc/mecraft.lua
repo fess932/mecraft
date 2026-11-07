@@ -200,12 +200,7 @@ end
 -- twice when it moves it inside the network (-32770 and +32770 when cells
 -- or storage buses reshuffle). Net them per item first, so only what
 -- really came or left counts as income or spending.
-local function onItems(_, addr, ...)
-  -- only the component we subscribed to: other ME parts on the same
-  -- computer report the same changes again
-  if addr ~= me.address then
-    return
-  end
+local function onItems(_, ...)
   local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
@@ -232,10 +227,7 @@ local function onItems(_, addr, ...)
   end
 end
 
-local function onFluids(_, addr, ...)
-  if addr ~= me.address then
-    return
-  end
+local function onFluids(_, ...)
   local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
