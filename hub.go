@@ -22,6 +22,7 @@ type wireItem struct {
 	Size      float64 `json:"size"`
 	HasTag    bool    `json:"hasTag"`
 	Craftable bool    `json:"isCraftable"`
+	Out       float64 `json:"out"` // deltas: how much left within the batch
 }
 
 func (w wireItem) item() Item {
@@ -40,6 +41,7 @@ type wireFluid struct {
 	Label     string  `json:"label"`
 	Amount    float64 `json:"amount"`
 	Craftable bool    `json:"isCraftable"`
+	Out       float64 `json:"out"` // deltas: how much left within the batch
 }
 
 func (w wireFluid) fluid() Fluid {
@@ -82,6 +84,8 @@ type inMsg struct {
 type Hub struct {
 	store *Store
 	token string
+	// Stats, when set, records every change of the network.
+	Stats *Stats
 
 	mu   sync.Mutex
 	conn net.Conn
@@ -166,13 +170,31 @@ func (h *Hub) dispatch(m inMsg) {
 	case "items":
 		h.store.AddItems(convertItems(m.Items))
 	case "items_end":
-		h.store.EndItems()
+		h.recordFix(h.store.EndItems())
 	case "item_delta":
 		h.store.ApplyItemDelta(convertItems(m.Items))
+		if h.Stats != nil {
+			flows := map[string]Flow{}
+			for _, w := range m.Items {
+				if w.Name != "" {
+					addFlow(flows, w.item().Key(), int64(w.Size), int64(w.Out))
+				}
+			}
+			h.Stats.Record(flows)
+		}
 	case "fluids":
-		h.store.SetFluids(convertFluids(m.Fluids))
+		h.recordFix(h.store.SetFluids(convertFluids(m.Fluids)))
 	case "fluid_delta":
 		h.store.ApplyFluidDelta(convertFluids(m.Fluids))
+		if h.Stats != nil {
+			flows := map[string]Flow{}
+			for _, w := range m.Fluids {
+				if w.Name != "" {
+					addFlow(flows, fluidKeyPrefix+w.Name, int64(w.Amount), int64(w.Out))
+				}
+			}
+			h.Stats.Record(flows)
+		}
 	case "cpus":
 		cpus := make([]CPU, 0, len(m.CPUs))
 		for _, c := range m.CPUs {
@@ -302,4 +324,27 @@ func (h *Hub) Craft(it Item, amount int64, auto bool) (*Job, error) {
 
 func (h *Hub) Resync() error {
 	return h.send(map[string]any{"type": "resync"})
+}
+
+// addFlow turns a delta into income and spending. Scripts older than the
+// out field send only the net change.
+func addFlow(flows map[string]Flow, key string, net, out int64) {
+	if out == 0 && net < 0 {
+		out = -net
+	}
+	f := flows[key]
+	f.add(Flow{In: net + out, Out: out})
+	flows[key] = f
+}
+
+// recordFix stores what a full sync found that the change events missed.
+func (h *Hub) recordFix(diff map[string]int64) {
+	if h.Stats == nil || len(diff) == 0 {
+		return
+	}
+	flows := make(map[string]Flow, len(diff))
+	for k, d := range diff {
+		flows[k] = Flow{Fix: d}
+	}
+	h.Stats.Record(flows)
 }

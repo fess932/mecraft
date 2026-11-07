@@ -107,9 +107,11 @@ type Store struct {
 	connected bool
 	client    string
 	lastSync  time.Time
-	lastSeen  time.Time
-	failure   string // why the OC script stopped, until the next full sync
-	jobEvents chan struct{}
+	// fluidsSynced is set by the first full fluid list.
+	fluidsSynced bool
+	lastSeen     time.Time
+	failure      string // why the OC script stopped, until the next full sync
+	jobEvents    chan struct{}
 }
 
 func NewStore() *Store {
@@ -178,15 +180,40 @@ func (s *Store) SetFailure(msg string) {
 	s.mu.Unlock()
 }
 
-func (s *Store) EndItems() {
+// EndItems puts the full list in place. It returns how the list differs
+// from the stock tracked by change events since the previous list, by key;
+// nil for the first list, which has nothing to compare with.
+func (s *Store) EndItems() map[string]int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failure = ""
+	var diff map[string]int64
 	if s.staging != nil {
+		if !s.lastSync.IsZero() {
+			diff = map[string]int64{}
+			for k, it := range s.staging {
+				if d := it.Size - sizeOf(s.items[k]); d != 0 {
+					diff[k] = d
+				}
+			}
+			for k, it := range s.items {
+				if _, ok := s.staging[k]; !ok && it.Size != 0 {
+					diff[k] = -it.Size
+				}
+			}
+		}
 		s.items = s.staging
 		s.staging = nil
 	}
 	s.lastSync = time.Now()
+	return diff
+}
+
+func sizeOf(it *Item) int64 {
+	if it == nil {
+		return 0
+	}
+	return it.Size
 }
 
 // ApplyItemDelta adds signed size changes from network_item_changed events.
@@ -213,14 +240,37 @@ func (s *Store) ApplyItemDelta(items []Item) {
 	}
 }
 
-func (s *Store) SetFluids(fluids []Fluid) {
+// SetFluids puts the full fluid list in place and, like EndItems, returns
+// how it differs from the tracked amounts, keyed like Fluid.Item().Key().
+func (s *Store) SetFluids(fluids []Fluid) map[string]int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.fluids = make(map[string]*Fluid, len(fluids))
+	next := make(map[string]*Fluid, len(fluids))
 	for _, f := range fluids {
 		f := f
-		s.fluids[f.Name] = &f
+		next[f.Name] = &f
 	}
+	var diff map[string]int64
+	if s.fluidsSynced {
+		diff = map[string]int64{}
+		for n, f := range next {
+			var had int64
+			if cur := s.fluids[n]; cur != nil {
+				had = cur.Amount
+			}
+			if d := f.Amount - had; d != 0 {
+				diff[fluidKeyPrefix+n] = d
+			}
+		}
+		for n, f := range s.fluids {
+			if _, ok := next[n]; !ok && f.Amount != 0 {
+				diff[fluidKeyPrefix+n] = -f.Amount
+			}
+		}
+	}
+	s.fluids = next
+	s.fluidsSynced = true
+	return diff
 }
 
 func (s *Store) ApplyFluidDelta(fluids []Fluid) {

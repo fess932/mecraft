@@ -9,6 +9,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 )
 
 //go:embed assets/templates/*.html
@@ -65,6 +69,23 @@ func main() {
 
 	store := NewStore()
 	hub := NewHub(store, cfg.Token)
+	statsDir := filepath.Join(filepath.Dir(*configPath), "mecraft-stats")
+	stats, err := OpenStats(statsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	hub.Stats = stats
+	go stats.Run()
+	// Ctrl+C: write the current minute of the statistics out first.
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		<-sig
+		if err := stats.Close(); err != nil {
+			log.Printf("stats: %v", err)
+		}
+		os.Exit(0)
+	}()
 	rules := NewRules(*configPath, fileCfg)
 	icons := sub(iconsFS, "assets/icons")
 	static := sub(staticFS, "assets/static")
