@@ -196,39 +196,67 @@ local function outOf(n)
   return n < 0 and -n or 0
 end
 
-local function onItems(_, ...)
+-- An event lists the changes of one moment, and AE2 may list one stack
+-- twice when it moves it inside the network (-32770 and +32770 when cells
+-- or storage buses reshuffle). Net them per item first, so only what
+-- really came or left counts as income or spending.
+local function onItems(_, addr, ...)
+  -- only the component we subscribed to: other ME parts on the same
+  -- computer report the same changes again
+  if addr ~= me.address then
+    return
+  end
+  local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
     if type(s) == "table" and s.name then
       local k = s.name .. "|" .. tostring(s.damage or 0) .. "|" .. tostring(s.label)
-      local d = itemDelta[k]
-      local n = s.size or 0
-      if d then
-        d.size = d.size + n
-        d.out = d.out + outOf(n)
+      local e = net[k]
+      if e then
+        e.size = e.size + (s.size or 0)
       else
-        d = itemOf(s)
-        d.out = outOf(n)
-        itemDelta[k] = d
+        net[k] = itemOf(s)
       end
+    end
+  end
+  for k, e in pairs(net) do
+    local d = itemDelta[k]
+    local n = e.size
+    if d then
+      d.size = d.size + n
+      d.out = d.out + outOf(n)
+    else
+      e.out = outOf(n)
+      itemDelta[k] = e
     end
   end
 end
 
-local function onFluids(_, ...)
+local function onFluids(_, addr, ...)
+  if addr ~= me.address then
+    return
+  end
+  local net = {}
   for i = 1, select("#", ...) do
     local s = select(i, ...)
     if type(s) == "table" and s.name then
-      local d = fluidDelta[s.name]
-      local n = s.amount or 0
-      if d then
-        d.amount = d.amount + n
-        d.out = d.out + outOf(n)
+      local e = net[s.name]
+      if e then
+        e.amount = e.amount + (s.amount or 0)
       else
-        d = fluidOf(s)
-        d.out = outOf(n)
-        fluidDelta[s.name] = d
+        net[s.name] = fluidOf(s)
       end
+    end
+  end
+  for k, e in pairs(net) do
+    local d = fluidDelta[k]
+    local n = e.amount
+    if d then
+      d.amount = d.amount + n
+      d.out = d.out + outOf(n)
+    else
+      e.out = outOf(n)
+      fluidDelta[k] = e
     end
   end
 end
@@ -497,6 +525,10 @@ end
 local function session()
   inbuf = ""
   send({ type = "hello", token = TOKEN, version = 1, me = meType })
+  -- Off first: a subscription left by a crashed run or a probe would
+  -- otherwise make AE2 send every change twice.
+  pcall(me.setItemEventSubscription, false)
+  pcall(me.setFluidEventSubscription, false)
   me.setItemEventSubscription(true)
   me.setFluidEventSubscription(true)
   fullSync()
