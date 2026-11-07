@@ -118,3 +118,47 @@ func TestAddFlow(t *testing.T) {
 		t.Fatalf("%+v", g)
 	}
 }
+
+func TestStatsSeries(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
+	s, err := openStats(t.TempDir(), c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	// 12:00:00 +5, 12:00:25 +7, 12:01:05 +11, 13:30 out 4
+	s.Record(map[string]Flow{"a": {In: 5}})
+	c.t = c.t.Add(25 * time.Second)
+	s.Record(map[string]Flow{"a": {In: 7}})
+	c.t = time.Date(2026, 11, 7, 12, 1, 5, 0, time.UTC)
+	s.Record(map[string]Flow{"a": {In: 11}})
+
+	// 10-second buckets ending at 12:01:10
+	ser := s.Series([]string{"a", "missing"}, time.Date(2026, 11, 7, 12, 1, 10, 0, time.UTC), 10*time.Second, 7)
+	got := []int64{}
+	for _, f := range ser["a"] {
+		got = append(got, f.In)
+	}
+	want := []int64{5, 0, 7, 0, 0, 0, 11}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("10s buckets %v, want %v", got, want)
+		}
+	}
+	if len(ser["missing"]) != 7 {
+		t.Fatal("an unknown key gets zero buckets")
+	}
+
+	// minute buckets ending at 12:02, the minute in progress included
+	ser = s.Series([]string{"a"}, time.Date(2026, 11, 7, 12, 2, 0, 0, time.UTC), time.Minute, 2)
+	if ser["a"][0].In != 12 || ser["a"][1].In != 11 {
+		t.Fatalf("minute buckets %+v", ser["a"])
+	}
+
+	c.t = time.Date(2026, 11, 7, 13, 30, 0, 0, time.UTC)
+	s.Record(map[string]Flow{"a": {Out: 4}})
+	ser = s.Series([]string{"a"}, time.Date(2026, 11, 7, 14, 0, 0, 0, time.UTC), time.Hour, 2)
+	if ser["a"][0].In != 23 || ser["a"][1].Out != 4 {
+		t.Fatalf("hour buckets %+v", ser["a"])
+	}
+}

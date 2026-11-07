@@ -59,6 +59,9 @@ type Stats struct {
 	cur     map[uint32]*Flow
 	minutes map[int64]map[uint32]Flow // last statsMinuteKeep, per minute
 	hours   map[int64]map[uint32]Flow // last statsHourKeep, per unix hour
+	// tens holds the last statsTensKeep in 10-second buckets, in memory
+	// only, for the shortest chart.
+	tens map[int64]map[uint32]Flow
 
 	now func() time.Time
 }
@@ -67,6 +70,7 @@ const (
 	statsMinuteKeep  = 24 * time.Hour      // minute detail kept in memory
 	statsHourKeep    = 31 * 24 * time.Hour // history loaded at start
 	statsMinuteFiles = 7 * 24 * time.Hour  // .min files older than this become .hour
+	statsTensKeep    = time.Hour           // 10-second buckets kept in memory
 )
 
 // OpenStats loads the history from dir, creating it if missing.
@@ -81,7 +85,7 @@ func openStats(dir string, now func() time.Time) (*Stats, error) {
 	s := &Stats{
 		dir: dir, ids: map[string]uint32{}, cur: map[uint32]*Flow{},
 		minutes: map[int64]map[uint32]Flow{}, hours: map[int64]map[uint32]Flow{},
-		now: now,
+		tens: map[int64]map[uint32]Flow{}, now: now,
 	}
 	if err := s.loadKeys(); err != nil {
 		return nil, err
@@ -147,6 +151,12 @@ func (s *Stats) Record(flows map[string]Flow) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.roll()
+	ten := s.now().Unix() / 10
+	tb := s.tens[ten]
+	if tb == nil {
+		tb = map[uint32]Flow{}
+		s.tens[ten] = tb
+	}
 	for k, f := range flows {
 		id, err := s.id(k)
 		if err != nil {
@@ -159,6 +169,9 @@ func (s *Stats) Record(flows map[string]Flow) {
 			s.cur[id] = c
 		}
 		c.add(f)
+		g := tb[id]
+		g.add(f)
+		tb[id] = g
 	}
 }
 
@@ -208,6 +221,12 @@ func (s *Stats) prune() {
 	for m := range s.minutes {
 		if m < minMin {
 			delete(s.minutes, m)
+		}
+	}
+	minTen := now.Add(-statsTensKeep).Unix() / 10
+	for t := range s.tens {
+		if t < minTen {
+			delete(s.tens, t)
 		}
 	}
 	minHour := unixMinute(now.Add(-statsHourKeep)) / 60
@@ -473,4 +492,61 @@ func (s *Stats) Close() error {
 		s.cur = map[uint32]*Flow{}
 	}
 	return s.kf.Close()
+}
+
+// Series sums the flows of the given keys into n buckets of step that end
+// at to: bucket i covers [to-(n-i)*step, to-(n-i-1)*step). Steps under a
+// minute come from the 10-second buckets of the last hour, steps under an
+// hour from the minutes of the last day, longer ones from the hours.
+// Buckets outside the kept history stay zero.
+func (s *Stats) Series(keys []string, to time.Time, step time.Duration, n int) map[string][]Flow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.roll()
+	out := make(map[string][]Flow, len(keys))
+	want := map[uint32][]Flow{}
+	for _, k := range keys {
+		ser := make([]Flow, n)
+		out[k] = ser
+		if id, ok := s.ids[k]; ok {
+			want[id] = ser
+		}
+	}
+	if len(want) == 0 || n <= 0 || step <= 0 {
+		return out
+	}
+	from := to.Add(-time.Duration(n) * step)
+	put := func(start time.Time, flows map[uint32]Flow) {
+		if start.Before(from) || !start.Before(to) {
+			return
+		}
+		i := int(start.Sub(from) / step)
+		for id, ser := range want {
+			if f, ok := flows[id]; ok {
+				ser[i].add(f)
+			}
+		}
+	}
+	cur := make(map[uint32]Flow, len(s.cur))
+	for id, f := range s.cur {
+		cur[id] = *f
+	}
+	switch {
+	case step < time.Minute:
+		for t, flows := range s.tens {
+			put(time.Unix(t*10, 0), flows)
+		}
+	case step < time.Hour:
+		for m, flows := range s.minutes {
+			put(time.Unix(m*60, 0), flows)
+		}
+		put(time.Unix(s.curMin*60, 0), cur)
+	default:
+		for h, flows := range s.hours {
+			put(time.Unix(h*3600, 0), flows)
+		}
+		// the minute in progress is not in the hours yet
+		put(time.Unix(s.curMin*60, 0), cur)
+	}
+	return out
 }
