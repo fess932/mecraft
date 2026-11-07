@@ -38,6 +38,7 @@ func main() {
 	token := flag.String("token", "", "password the OC client must send (overrides token in the config)")
 	every := flag.String("maintain-every", "", "how often stock levels are checked, e.g. 5s (overrides maintainEvery)")
 	flag.Parse()
+	log.Printf("mecraft: версия %s", buildVersion())
 
 	fileCfg, err := LoadConfig(*configPath)
 	if err != nil {
