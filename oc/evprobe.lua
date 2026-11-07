@@ -3,6 +3,7 @@
 -- Prints the first events as they arrive, then how many there were and
 -- what their sizes add up to, next to the stock before and after.
 local component = require("component")
+local computer = require("computer")
 local event = require("event")
 local ser = require("serialization")
 
@@ -59,16 +60,36 @@ end
 -- AE2 sends the events only once someone subscribed; mecraft does it at
 -- start. Turn it on here too and leave it on: mecraft may be running.
 if me and me.setItemEventSubscription then
-  pcall(me.setItemEventSubscription, true)
+  print("подписка: " .. tostring(select(2, pcall(me.setItemEventSubscription, true))))
+else
+  print("подписки на события нет в этом компоненте")
 end
 
+-- Pull every signal the way mecraft does and count them by name, so a
+-- different event name or none at all shows up too.
 local before = stock()
 print("в сети было: " .. tostring(before) .. ", слушаю " .. secs .. " с...")
-event.listen("network_item_changed", on)
-os.sleep(secs)
-event.ignore("network_item_changed", on)
+local names, firstOther = {}, nil
+local deadline = computer.uptime() + secs
+while computer.uptime() < deadline do
+  local sig = table.pack(event.pull(0.25))
+  if sig[1] then
+    names[sig[1]] = (names[sig[1]] or 0) + 1
+    if sig[1] == "network_item_changed" then
+      on(table.unpack(sig, 1, sig.n))
+    elseif not firstOther and tostring(sig[1]):find("network", 1, true) then
+      firstOther = ser.serialize(sig)
+    end
+  end
+end
 local after = stock()
-print("всего событий: " .. events .. ", записей про предмет: " .. matched)
+for n, c in pairs(names) do
+  print("сигнал " .. tostring(n) .. ": " .. c)
+end
+if firstOther then
+  print("пример: " .. firstOther:sub(1, 300))
+end
+print("событий network_item_changed: " .. events .. ", записей про предмет: " .. matched)
 print("сумма size: " .. sum .. " (плюсы " .. plus .. ", минусы " .. minus .. ")")
 print("в сети стало: " .. tostring(after) .. ", разница: " ..
   ((type(before) == "number" and type(after) == "number") and tostring(after - before) or "?"))
