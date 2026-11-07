@@ -56,6 +56,12 @@ local function on(name, ...)
   end
 end
 
+-- AE2 sends the events only once someone subscribed; mecraft does it at
+-- start. Turn it on here too and leave it on: mecraft may be running.
+if me and me.setItemEventSubscription then
+  pcall(me.setItemEventSubscription, true)
+end
+
 local before = stock()
 print("в сети было: " .. tostring(before) .. ", слушаю " .. secs .. " с...")
 event.listen("network_item_changed", on)
